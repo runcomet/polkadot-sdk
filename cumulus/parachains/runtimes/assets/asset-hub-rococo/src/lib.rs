@@ -62,7 +62,9 @@ use frame_support::{
 	construct_runtime, derive_impl,
 	dispatch::DispatchClass,
 	genesis_builder_helper::{build_state, get_preset},
-	ord_parameter_types, parameter_types,
+	ord_parameter_types,
+	pallet_prelude::EnsureOrigin,
+	parameter_types,
 	traits::{
 		fungible, fungible::HoldConsideration, fungibles, tokens::imbalance::ResolveAssetTo,
 		AsEnsureOriginWithArg, ConstBool, ConstU128, ConstU32, ConstU64, ConstU8,
@@ -72,6 +74,7 @@ use frame_support::{
 	BoundedVec, PalletId,
 };
 use frame_system::{
+	ensure_signed,
 	limits::{BlockLength, BlockWeights},
 	EnsureRoot, EnsureSigned, EnsureSignedBy,
 };
@@ -971,12 +974,32 @@ parameter_types! {
 	pub const NftsDepositPerByte: Balance = UniquesDepositPerByte::get();
 }
 
+pub struct EnsureSignedOrRootWithId;
+
+impl EnsureOrigin<RuntimeOrigin> for EnsureSignedOrRootWithId {
+	type Success = (AccountId, CollectionId);
+
+	fn try_origin(o: RuntimeOrigin) -> Result<Self::Success, RuntimeOrigin> {
+		if let Ok(who) = ensure_signed(o.clone()) {
+			return Ok((who, 0u32)); // Note: Collection ID will be set by the extrinsic
+		}
+
+		Err(o)
+	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn successful_origin() -> RuntimeOrigin {
+		RuntimeOrigin::from(frame_system::RawOrigin::Signed(Default::default()))
+	}
+}
+
 impl pallet_nfts::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type CollectionId = CollectionId;
 	type ItemId = ItemId;
 	type Currency = Balances;
 	type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
+	type CreateOriginWithId = EnsureSignedOrRootWithId;
 	type ForceOrigin = AssetsForceOrigin;
 	type Locker = ();
 	type CollectionDeposit = NftsCollectionDeposit;

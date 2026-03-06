@@ -138,6 +138,13 @@ use impls::AllianceProposalProvider;
 
 /// Constant values used within the runtime.
 pub mod constants;
+use crate::{
+	parachains_common_types::CollectionId,
+	polkadot_sdk_frame::{
+		runtime::prelude::ensure_signed,
+		traits::EnsureOrigin,
+	},
+};
 use constants::{currency::*, time::*};
 use sp_runtime::generic::Era;
 
@@ -2200,6 +2207,25 @@ parameter_types! {
 	pub const MaxAttributesPerCall: u32 = 10;
 }
 
+pub struct EnsureSignedOrRootWithId;
+
+impl EnsureOrigin<RuntimeOrigin> for EnsureSignedOrRootWithId {
+	type Success = (AccountId, CollectionId);
+
+	fn try_origin(o: RuntimeOrigin) -> Result<Self::Success, RuntimeOrigin> {
+		if let Ok(who) = ensure_signed(o.clone()) {
+			return Ok((who, 0u32)); // Note: Collection ID will be set by the extrinsic
+		}
+
+		Err(o)
+	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn successful_origin() -> RuntimeOrigin {
+		RuntimeOrigin::from(frame_system::RawOrigin::Signed(Default::default()))
+	}
+}
+
 impl pallet_nfts::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type CollectionId = u32;
@@ -2226,6 +2252,7 @@ impl pallet_nfts::Config for Runtime {
 	#[cfg(feature = "runtime-benchmarks")]
 	type Helper = ();
 	type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
+	type CreateOriginWithId = EnsureSignedOrRootWithId;
 	type Locker = ();
 	type BlockNumberProvider = frame_system::Pallet<Runtime>;
 }
