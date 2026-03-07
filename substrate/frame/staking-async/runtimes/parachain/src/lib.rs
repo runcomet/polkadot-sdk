@@ -118,6 +118,9 @@ use xcm_runtime_apis::{
 	fees::Error as XcmPaymentApiError,
 };
 
+use frame_support::pallet_prelude::EnsureOrigin;
+use frame_system::ensure_signed;
+
 impl_opaque_keys! {
 	pub struct SessionKeys {
 		pub aura: Aura,
@@ -1038,12 +1041,31 @@ parameter_types! {
 	pub const NftsDepositPerByte: Balance = UniquesDepositPerByte::get();
 }
 
+pub struct EnsureSignedOrRootWithId;
+
+impl EnsureOrigin<RuntimeOrigin> for EnsureSignedOrRootWithId {
+	type Success = (AccountId, CollectionId);
+
+	fn try_origin(o: RuntimeOrigin) -> Result<Self::Success, RuntimeOrigin> {
+		if let Ok(who) = ensure_signed(o.clone()) {
+			return Ok((who, 0u32)); // Note: Collection ID will be set by the extrinsic
+		}
+		Err(o)
+	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn successful_origin() -> RuntimeOrigin {
+		RuntimeOrigin::from(frame_system::RawOrigin::Signed(Default::default()))
+	}
+}
+
 impl pallet_nfts::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type CollectionId = CollectionId;
 	type ItemId = ItemId;
 	type Currency = Balances;
 	type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
+	type CreateOriginWithId = EnsureSignedOrRootWithId;
 	type ForceOrigin = AssetsForceOrigin;
 	type Locker = ();
 	type CollectionDeposit = NftsCollectionDeposit;
