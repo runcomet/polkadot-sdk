@@ -27,6 +27,7 @@ type Block = MockBlock<Test>;
 type Signature = MultiSignature;
 type AccountPublic = <Signature as Verify>::Signer;
 type AccountId = <AccountPublic as IdentifyAccount>::AccountId;
+type CollectionId = u32;
 
 // Configure a mock runtime to test the pallet.
 construct_runtime!(
@@ -83,12 +84,32 @@ parameter_types! {
 	pub storage Features: PalletFeatures = PalletFeatures::all_enabled();
 }
 
+pub struct EnsureSignedOrRootWithId;
+
+impl EnsureOrigin<RuntimeOrigin> for EnsureSignedOrRootWithId {
+	type Success = (AccountId, CollectionId);
+
+	fn try_origin(o: RuntimeOrigin) -> Result<Self::Success, RuntimeOrigin> {
+		if let Ok(who) = ensure_signed(o.clone()) {
+			return Ok((who, 0u32)); // Note: Collection ID will be set by the extrinsic
+		}
+
+		Err(o)
+	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn successful_origin() -> RuntimeOrigin {
+		RuntimeOrigin::from(frame_system::RawOrigin::Signed(Default::default()))
+	}
+}
+
 impl pallet_nfts::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type CollectionId = u32;
 	type ItemId = u32;
 	type Currency = Balances;
 	type CreateOrigin = AsEnsureOriginWithArg<frame_system::EnsureSigned<Self::AccountId>>;
+	type CreateOriginWithId = EnsureSignedOrRootWithId;
 	type ForceOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type Locker = ();
 	type CollectionDeposit = ConstU64<2>;
