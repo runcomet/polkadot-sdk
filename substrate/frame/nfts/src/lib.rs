@@ -161,7 +161,10 @@ pub mod pallet {
 			Success = Self::AccountId,
 		>;
 
-        type CreateOriginWithId: EnsureOrigin<Self::RuntimeOrigin, Success = (Self::AccountId, Self::CollectionId)>;
+		type CreateOriginWithId: EnsureOrigin<
+			Self::RuntimeOrigin,
+			Success = (Self::AccountId, Self::CollectionId),
+		>;
 
 		/// Locker trait to enable Locking mechanism downstream.
 		type Locker: Locker<Self::CollectionId, Self::ItemId>;
@@ -1935,44 +1938,44 @@ pub mod pallet {
 			Self::do_set_attributes_pre_signed(origin, data, signer)
 		}
 
-        #[pallet::call_index(39)]
-        #[pallet::weight(T::WeightInfo::create())]
-        pub fn create_with_id(
-            origin: OriginFor<T>,
-            admin: AccountIdLookupOf<T>,
-            config: CollectionConfigFor<T, I>,
-        ) -> DispatchResult {
-            let res = T::CreateOriginWithId::ensure_origin(origin)?;
+		#[pallet::call_index(39)]
+		#[pallet::weight(T::WeightInfo::create())]
+		pub fn create_with_id(
+			origin: OriginFor<T>,
+			admin: AccountIdLookupOf<T>,
+			config: CollectionConfigFor<T, I>,
+		) -> DispatchResult {
+			let res = T::CreateOriginWithId::ensure_origin(origin)?;
 
-            let collection = res.1;
+			let collection = res.1;
 
-            let owner = res.0;
+			let owner = res.0;
 
-            // Ensure the collection ID isn't already in use
-            ensure!(
-                !Collection::<T, I>::contains_key(&collection),
-                Error::<T, I>::CollectionIdInUse
-            );
+			// Ensure the collection ID isn't already in use
+			ensure!(
+				!Collection::<T, I>::contains_key(&collection),
+				Error::<T, I>::CollectionIdInUse
+			);
 
-            let admin = T::Lookup::lookup(admin)?;
+			let admin = T::Lookup::lookup(admin)?;
 
-            // DepositRequired can be disabled by calling the force_create() only
-            ensure!(
-                !config.has_disabled_setting(CollectionSetting::DepositRequired),
-                Error::<T, I>::WrongSetting
-            );
+			// DepositRequired can be disabled by calling the force_create() only
+			ensure!(
+				!config.has_disabled_setting(CollectionSetting::DepositRequired),
+				Error::<T, I>::WrongSetting
+			);
 
-            Self::do_create_collection(
-                collection.clone(),
-                owner.clone(),
-                admin.clone(),
-                config,
-                T::CollectionDeposit::get(),
-                Event::Created { collection, creator: owner, owner: admin },
-            )?;
+			Self::do_create_collection(
+				collection.clone(),
+				owner.clone(),
+				admin.clone(),
+				config,
+				T::CollectionDeposit::get(),
+				Event::Created { collection, creator: owner, owner: admin },
+			)?;
 
-            Ok(())
-        }
+			Ok(())
+		}
 	}
 }
 

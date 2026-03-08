@@ -3878,66 +3878,66 @@ fn clear_collection_metadata_works() {
 
 #[test]
 fn create_with_id_basic_should_work() {
-    new_test_ext().execute_with(|| {
-        let collection_id = 42;
-        let owner = account(1);
-        let admin = account(2);
+	new_test_ext().execute_with(|| {
+		let collection_id = 42;
+		let owner = account(1);
+		let admin = account(2);
 
-        Balances::make_free_balance_be(&owner, 100);
+		Balances::make_free_balance_be(&owner, 100);
 
-        NextCollectionId::<Test>::set(Some(collection_id));
+		NextCollectionId::<Test>::set(Some(collection_id));
 
-        // Create collection with specific ID
-        assert_ok!(Nfts::create_with_id(
-            RuntimeOrigin::signed(owner.clone()),
-            account(2),
-            collection_config_with_all_settings_enabled()
-        ));
+		// Create collection with specific ID
+		assert_ok!(Nfts::create_with_id(
+			RuntimeOrigin::signed(owner.clone()),
+			account(2),
+			collection_config_with_all_settings_enabled()
+		));
 
-        assert_eq!(collections(), vec![(owner.clone(), collection_id)]);
+		assert_eq!(collections(), vec![(owner.clone(), collection_id)]);
 
-        let collection = Collection::<Test>::get(collection_id).unwrap();
-        assert_eq!(collection.owner, owner);
-        assert_eq!(collection.owner_deposit, 2);
+		let collection = Collection::<Test>::get(collection_id).unwrap();
+		assert_eq!(collection.owner, owner);
+		assert_eq!(collection.owner_deposit, 2);
 
-        let config = CollectionConfigOf::<Test>::get(collection_id).unwrap();
-        assert_eq!(config, collection_config_with_all_settings_enabled());
+		let config = CollectionConfigOf::<Test>::get(collection_id).unwrap();
+		assert_eq!(config, collection_config_with_all_settings_enabled());
 
-        assert!(events().contains(&Event::<Test>::Created {
-            collection: collection_id,
-            creator: owner,
-            owner: admin,
-        }));
-    });
+		assert!(events().contains(&Event::<Test>::Created {
+			collection: collection_id,
+			creator: owner,
+			owner: admin,
+		}));
+	});
 }
 
 #[test]
 fn create_with_id_collection_id_already_in_use() {
-    new_test_ext().execute_with(|| {
-        let collection_id = 42;
-        let owner1 = account(1);
-        let owner2 = account(2);
+	new_test_ext().execute_with(|| {
+		let collection_id = 42;
+		let owner1 = account(1);
+		let owner2 = account(2);
 
-        NextCollectionId::<Test>::set(Some(collection_id));
+		NextCollectionId::<Test>::set(Some(collection_id));
 
-        Balances::make_free_balance_be(&owner1, 100);
-        Balances::make_free_balance_be(&owner2, 100);
+		Balances::make_free_balance_be(&owner1, 100);
+		Balances::make_free_balance_be(&owner2, 100);
 
-        assert_ok!(Nfts::create_with_id(
-            RuntimeOrigin::signed(owner1.clone()),
-            account(1),
-            collection_config_with_all_settings_enabled()
-        ));
+		assert_ok!(Nfts::create_with_id(
+			RuntimeOrigin::signed(owner1.clone()),
+			account(1),
+			collection_config_with_all_settings_enabled()
+		));
 
-        assert_noop!(
-            Nfts::create_with_id(
-                RuntimeOrigin::signed(owner2.clone()),
-                account(2),
-                collection_config_with_all_settings_enabled()
-            ),
-            Error::<Test>::CollectionIdInUse
-        );
+		assert_noop!(
+			Nfts::create_with_id(
+				RuntimeOrigin::signed(owner2.clone()),
+				account(2),
+				collection_config_with_all_settings_enabled()
+			),
+			Error::<Test>::CollectionIdInUse
+		);
 
-        assert_eq!(collections(), vec![(owner1, collection_id)]);
-    });
+		assert_eq!(collections(), vec![(owner1, collection_id)]);
+	});
 }

@@ -21,7 +21,9 @@ use super::*;
 use crate as pallet_nfts;
 
 use frame_support::{
-	construct_runtime, derive_impl, parameter_types,
+	construct_runtime, derive_impl,
+	pallet_prelude::EnsureOrigin,
+	parameter_types,
 	traits::{AsEnsureOriginWithArg, ConstU32, ConstU64},
 };
 use sp_keystore::{testing::MemoryKeystore, KeystoreExt};
@@ -29,7 +31,6 @@ use sp_runtime::{
 	traits::{IdentifyAccount, IdentityLookup, Verify},
 	BuildStorage, MultiSignature,
 };
-use frame_support::pallet_prelude::EnsureOrigin;
 
 type Block = frame_system::mocking::MockBlock<Test>;
 
@@ -66,29 +67,29 @@ parameter_types! {
 pub struct EnsureSignedWithIdOrigin;
 
 impl EnsureOrigin<RuntimeOrigin> for EnsureSignedWithIdOrigin {
-    type Success = (AccountId, u32);
+	type Success = (AccountId, u32);
 
-    fn try_origin(o: RuntimeOrigin) -> Result<Self::Success, RuntimeOrigin> {
-        // For cases where no argument is provided, we need to get the collection ID
-        // from somewhere. Since this shouldn't be used directly with CreateOriginWithId,
-        // we'll just use the next available ID for completeness.
-        if let Ok(who) = frame_system::ensure_signed(o.clone()) {
-            let next_id = NextCollectionId::<Test>::get().unwrap_or(0u32);
-            return Ok((who, next_id));
-        }
-        if let Ok(()) = frame_system::ensure_root(o.clone()) {
-            let next_id = NextCollectionId::<Test>::get().unwrap_or(0u32);
-            return Ok((AccountId::from([0; 32]), next_id));
-        }
-        Err(o)
-    }
+	fn try_origin(o: RuntimeOrigin) -> Result<Self::Success, RuntimeOrigin> {
+		// For cases where no argument is provided, we need to get the collection ID
+		// from somewhere. Since this shouldn't be used directly with CreateOriginWithId,
+		// we'll just use the next available ID for completeness.
+		if let Ok(who) = frame_system::ensure_signed(o.clone()) {
+			let next_id = NextCollectionId::<Test>::get().unwrap_or(0u32);
+			return Ok((who, next_id));
+		}
+		if let Ok(()) = frame_system::ensure_root(o.clone()) {
+			let next_id = NextCollectionId::<Test>::get().unwrap_or(0u32);
+			return Ok((AccountId::from([0; 32]), next_id));
+		}
+		Err(o)
+	}
 
-    #[cfg(feature = "runtime-benchmarks")]
-    fn try_successful_origin() -> RuntimeOrigin {
-        RuntimeOrigin::from(frame_system::RawOrigin::Signed(Default::default()))
-    }
+	#[cfg(feature = "runtime-benchmarks")]
+	fn try_successful_origin() -> Result<RuntimeOrigin, ()> {
+		let caller: AccountId = [0u8; 32].into();
+		Ok(RuntimeOrigin::from(frame_system::RawOrigin::Signed(caller)))
+	}
 }
-
 
 impl Config for Test {
 	type RuntimeEvent = RuntimeEvent;
@@ -96,7 +97,7 @@ impl Config for Test {
 	type ItemId = u32;
 	type Currency = Balances;
 	type CreateOrigin = AsEnsureOriginWithArg<frame_system::EnsureSigned<Self::AccountId>>;
-    type CreateOriginWithId = EnsureSignedWithIdOrigin;
+	type CreateOriginWithId = EnsureSignedWithIdOrigin;
 	type ForceOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type Locker = ();
 	type CollectionDeposit = ConstU64<2>;
