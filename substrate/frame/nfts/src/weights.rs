@@ -111,6 +111,7 @@ pub trait WeightInfo {
 	fn claim_swap() -> Weight;
 	fn mint_pre_signed(n: u32, ) -> Weight;
 	fn set_attributes_pre_signed(n: u32, ) -> Weight;
+    fn create_with_id() -> Weight;
 }
 
 /// Weights for `pallet_nfts` using the Substrate node and recommended hardware.
@@ -803,6 +804,23 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().writes((1_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 2954).saturating_mul(n.into()))
 	}
+    /// Storage: `Nfts::Collection` (r:1 w:1)
+    /// Proof: `Nfts::Collection` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `MaxEncodedLen`)
+    /// Storage: `Nfts::CollectionRoleOf` (r:0 w:1)
+    /// Proof: `Nfts::CollectionRoleOf` (`max_values`: None, `max_size`: Some(69), added: 2544, mode: `MaxEncodedLen`)
+    /// Storage: `Nfts::CollectionConfigOf` (r:0 w:1)
+    /// Proof: `Nfts::CollectionConfigOf` (`max_values`: None, `max_size`: Some(73), added: 2548, mode: `MaxEncodedLen`)
+    /// Storage: `Nfts::CollectionAccount` (r:0 w:1)
+    /// Proof: `Nfts::CollectionAccount` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `MaxEncodedLen`)
+    fn create_with_id() -> Weight {
+        // Proof Size summary in bytes:
+        //  Measured:  `249`
+        //  Estimated: `3549`
+        // Minimum execution time: 26_000_000 picoseconds.
+        Weight::from_parts(26_000_000, 3549)
+            .saturating_add(RocksDbWeight::get().reads(1_u64))
+            .saturating_add(RocksDbWeight::get().writes(4_u64))
+    }
 }
 
 // For backwards compatibility and tests.
@@ -1494,4 +1512,21 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().writes((1_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 2954).saturating_mul(n.into()))
 	}
+    /// Storage: `Nfts::Collection` (r:1 w:1)
+    /// Proof: `Nfts::Collection` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `MaxEncodedLen`)
+    /// Storage: `Nfts::CollectionRoleOf` (r:0 w:1)
+    /// Proof: `Nfts::CollectionRoleOf` (`max_values`: None, `max_size`: Some(69), added: 2544, mode: `MaxEncodedLen`)
+    /// Storage: `Nfts::CollectionConfigOf` (r:0 w:1)
+    /// Proof: `Nfts::CollectionConfigOf` (`max_values`: None, `max_size`: Some(73), added: 2548, mode: `MaxEncodedLen`)
+    /// Storage: `Nfts::CollectionAccount` (r:0 w:1)
+    /// Proof: `Nfts::CollectionAccount` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `MaxEncodedLen`)
+    fn create_with_id() -> Weight {
+        // Proof Size summary in bytes:
+        //  Measured:  `249`
+        //  Estimated: `3549`
+        // Minimum execution time: 26_000_000 picoseconds.
+        Weight::from_parts(26_000_000, 3549)
+            .saturating_add(RocksDbWeight::get().reads(1_u64))
+            .saturating_add(RocksDbWeight::get().writes(4_u64))
+    }
 }

@@ -1939,7 +1939,7 @@ pub mod pallet {
 		}
 
 		#[pallet::call_index(39)]
-		#[pallet::weight(T::WeightInfo::create())]
+		#[pallet::weight(T::WeightInfo::create_with_id())]
 		pub fn create_with_id(
 			origin: OriginFor<T>,
 			admin: AccountIdLookupOf<T>,
