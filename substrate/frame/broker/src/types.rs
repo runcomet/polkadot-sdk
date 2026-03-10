@@ -267,7 +267,7 @@ pub struct SaleInfoRecord<Balance, RelayBlockNumber> {
 	/// Number of cores which have been sold; never more than cores_offered.
 	pub cores_sold: CoreIndex,
     /// Identifier for the current sale.
-    pub sale_id: u32
+    pub sale_index: u32
 }
 pub type SaleInfoRecordOf<T> = SaleInfoRecord<BalanceOf<T>, RelayBlockNumberOf<T>>;
 
