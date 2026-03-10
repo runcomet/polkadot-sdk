@@ -17,7 +17,28 @@
 //! Utility impl for the RPC types.
 use super::*;
 use alloc::vec::Vec;
+use codec::{Decode, Encode};
+use frame_support::DefaultNoBound;
+use scale_info::TypeInfo;
 use sp_core::{H160, U256};
+
+/// Configuration specific to a dry-run execution.
+#[derive(Debug, Encode, Decode, TypeInfo, Clone, DefaultNoBound)]
+pub struct DryRunConfig<Moment> {
+	/// Optional timestamp override for dry-run in pending block.
+	pub timestamp_override: Option<Moment>,
+	/// Used for future extensions without breaking encoding.
+	pub reserved: Option<()>,
+}
+impl<Moment> DryRunConfig<Moment> {
+	/// Create a new `DryRunConfig` with an optional timestamp override.
+	pub fn new(timestamp_override: Option<Moment>) -> Self {
+		Self {
+			timestamp_override,
+			reserved: None, // default value
+		}
+	}
+}
 
 impl From<BlockNumberOrTag> for BlockNumberOrTagOrHash {
 	fn from(b: BlockNumberOrTag) -> Self {
@@ -369,7 +390,6 @@ impl GenericTransaction {
 				value: self.value.unwrap_or_default(),
 				to: self.to.unwrap_or_default(),
 				gas: self.gas.unwrap_or_default(),
-				gas_price: self.max_fee_per_gas.unwrap_or_default(),
 				max_fee_per_gas: self.max_fee_per_gas.unwrap_or_default(),
 				max_priority_fee_per_gas: self.max_priority_fee_per_gas.unwrap_or_default(),
 				access_list: self.access_list.unwrap_or_default(),
@@ -435,7 +455,6 @@ fn from_unsigned_works_for_7702() {
 		value: U256::from(1),
 		to: H160::zero(),
 		gas: U256::from(1),
-		gas_price: U256::from(20),
 		max_fee_per_gas: U256::from(20),
 		max_priority_fee_per_gas: U256::from(1),
 		authorization_list: vec![AuthorizationListEntry {

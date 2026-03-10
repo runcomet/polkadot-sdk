@@ -69,8 +69,10 @@ impl<T: Config> Pallet<T> {
 		// Reserve - starts at second sale period boundary from now.
 		Self::do_reserve(workload.clone())?;
 
-		// Add to workload - grants one region from the next sale boundary.
-		Workplan::<T>::insert((sale.region_begin, core), &workload);
+		// Add to ForceReservations for dynamic core assignment in rotate_sale.
+		ForceReservations::<T>::try_mutate(|r| {
+			r.try_push(workload.clone()).map_err(|_| Error::<T>::TooManyReservations)
+		})?;
 
 		// Assign now until the next sale boundary unless the next timeslice is already the sale
 		// boundary.
@@ -353,7 +355,9 @@ impl<T: Config> Pallet<T> {
 					let assigned = match PotentialRenewals::<T>::get(renewal_id) {
 						Some(PotentialRenewalRecord { completion: Partial(w), price: p })
 							if price == p =>
-							w,
+						{
+							w
+						},
 						_ => CoreMask::void(),
 					} | region_id.mask;
 					let workload =
@@ -559,6 +563,7 @@ impl<T: Config> Pallet<T> {
 		workload_end_hint: Option<Timeslice>,
 	) -> DispatchResult {
 		let sale = SaleInfo::<T>::get().ok_or(Error::<T>::NoSales)?;
+		let mut core = core;
 
 		// Check if the core is expiring in the next bulk period; if so, we will renew it now.
 		//
@@ -567,7 +572,7 @@ impl<T: Config> Pallet<T> {
 		if PotentialRenewals::<T>::get(PotentialRenewalId { core, when: sale.region_begin })
 			.is_some()
 		{
-			Self::do_renew(sovereign_account.clone(), core)?;
+			core = Self::do_renew(sovereign_account.clone(), core)?;
 		} else if let Some(workload_end) = workload_end_hint {
 			ensure!(
 				PotentialRenewals::<T>::get(PotentialRenewalId { core, when: workload_end })
@@ -575,7 +580,7 @@ impl<T: Config> Pallet<T> {
 				Error::<T>::NotAllowed
 			);
 		} else {
-			return Err(Error::<T>::NotAllowed.into())
+			return Err(Error::<T>::NotAllowed.into());
 		}
 
 		// We are sorting auto renewals by `CoreIndex`.
@@ -615,6 +620,16 @@ impl<T: Config> Pallet<T> {
 		})?;
 
 		Self::deposit_event(Event::AutoRenewalDisabled { core, task });
+		Ok(())
+	}
+
+	pub(crate) fn do_remove_potential_renewal(core: CoreIndex, when: Timeslice) -> DispatchResult {
+		let renewal_id = PotentialRenewalId { core, when };
+
+		PotentialRenewals::<T>::take(renewal_id).ok_or(Error::<T>::UnknownRenewal)?;
+
+		Self::deposit_event(Event::PotentialRenewalRemoved { core, timeslice: when });
+
 		Ok(())
 	}
 

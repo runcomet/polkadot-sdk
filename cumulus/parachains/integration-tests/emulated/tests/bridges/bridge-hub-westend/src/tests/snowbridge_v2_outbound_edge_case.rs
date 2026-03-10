@@ -46,7 +46,8 @@ fn register_penpal_a_asset_from_penpal_b_will_fail() {
 			},
 		],
 	);
-	let asset_location_on_penpal = PenpalLocalTeleportableToAssetHub::get();
+	let asset_location_on_penpal =
+		PenpalB::execute_with(|| PenpalLocalTeleportableToAssetHub::get());
 	let penpal_a_asset_at_asset_hub =
 		Location::new(1, [Junction::Parachain(PenpalA::para_id().into())])
 			.appended_with(asset_location_on_penpal)
@@ -111,7 +112,7 @@ fn register_penpal_a_asset_from_penpal_b_will_fail() {
 		type RuntimeEvent = <AssetHubWestend as Chain>::RuntimeEvent;
 		assert_expected_events!(
 			AssetHubWestend,
-			vec![RuntimeEvent::ForeignAssets(pallet_assets::Event::Burned { .. }) => {},]
+			vec![RuntimeEvent::ForeignAssets(pallet_assets::Event::Withdrawn { .. }) => {},]
 		);
 	});
 

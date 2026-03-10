@@ -53,13 +53,14 @@ where
 		len: usize,
 	) -> Result<(), TransactionValidityError> {
 		let max = T::BlockWeights::get().get(info.class).max_extrinsic;
-		let total_weight_including_length = info.total_weight().add_proof_size(len as u64);
+		let total_weight_including_length =
+			info.total_weight().saturating_add_proof_size(len as u64);
 		match max {
 			Some(max) if total_weight_including_length.any_gt(max) => {
 				log::debug!(
 					target: LOG_TARGET,
-					"Extrinsic {} is greater than the max extrinsic {}",
-					info.total_weight(),
+					"Extrinsic with length included {} is greater than the max extrinsic {}",
+					total_weight_including_length,
 					max,
 				);
 
@@ -77,7 +78,7 @@ where
 		len: usize,
 	) -> Result<u32, TransactionValidityError> {
 		let length_limit = T::BlockLength::get();
-		let current_len = Pallet::<T>::all_extrinsics_len();
+		let current_len = Pallet::<T>::block_size();
 		let added_len = len as u32;
 		let next_len = current_len.saturating_add(added_len);
 		if next_len > *length_limit.max.get(info.class) {
@@ -132,7 +133,7 @@ where
 			calculate_consumed_weight::<T::RuntimeCall>(&maximum_weight, all_weight, info, len)?;
 		// Extrinsic weight already checked in `validate`.
 
-		crate::AllExtrinsicsLen::<T>::put(next_len);
+		crate::BlockSize::<T>::put(next_len);
 		crate::BlockWeight::<T>::put(next_weight);
 		Ok(())
 	}
@@ -225,7 +226,7 @@ where
 	const IDENTIFIER: &'static str = "CheckWeight";
 	type Implicit = ();
 	type Pre = ();
-	type Val = u32; /* next block length */
+	type Val = u32; // next block length
 
 	fn weight(&self, _: &T::RuntimeCall) -> Weight {
 		<T::ExtensionsWeightInfo as super::WeightInfo>::check_weight()
@@ -310,7 +311,7 @@ mod tests {
 	use super::*;
 	use crate::{
 		mock::{new_test_ext, RuntimeBlockWeights, System, Test, CALL},
-		AllExtrinsicsLen, BlockWeight, DispatchClass,
+		BlockSize, BlockWeight, DispatchClass,
 	};
 	use core::marker::PhantomData;
 	use frame_support::{assert_err, assert_ok, dispatch::Pays, weights::Weight};
@@ -549,7 +550,7 @@ mod tests {
 
 			// likewise for length limit.
 			let len = 100_usize;
-			AllExtrinsicsLen::<Test>::put(normal_length_limit());
+			BlockSize::<Test>::put(normal_length_limit());
 			assert_eq!(
 				CheckWeight::<Test>(PhantomData)
 					.validate_and_prepare(Some(1).into(), CALL, &normal, len, 0)
@@ -570,9 +571,9 @@ mod tests {
 	fn signed_ext_check_weight_block_size_works() {
 		new_test_ext().execute_with(|| {
 			let normal = DispatchInfo::default();
-			let normal_limit = normal_weight_limit().ref_time() as usize;
+			let normal_len_limit = normal_length_limit() as usize;
 			let reset_check_weight = |tx, s, f| {
-				AllExtrinsicsLen::<Test>::put(0);
+				BlockSize::<Test>::put(0);
 				let r = CheckWeight::<Test>(PhantomData).validate_and_prepare(
 					Some(1).into(),
 					CALL,
@@ -587,9 +588,9 @@ mod tests {
 				}
 			};
 
-			reset_check_weight(&normal, normal_limit - 1, false);
-			reset_check_weight(&normal, normal_limit, false);
-			reset_check_weight(&normal, normal_limit + 1, true);
+			reset_check_weight(&normal, normal_len_limit - 1, false);
+			reset_check_weight(&normal, normal_len_limit, false);
+			reset_check_weight(&normal, normal_len_limit + 1, true);
 
 			// Operational ones don't have this limit.
 			let op = DispatchInfo {
@@ -598,10 +599,12 @@ mod tests {
 				class: DispatchClass::Operational,
 				pays_fee: Pays::Yes,
 			};
-			reset_check_weight(&op, normal_limit, false);
-			reset_check_weight(&op, normal_limit + 100, false);
-			reset_check_weight(&op, 1024, false);
-			reset_check_weight(&op, 1025, true);
+			let operational_limit =
+				*<Test as Config>::BlockLength::get().max.get(DispatchClass::Operational) as usize;
+			reset_check_weight(&op, normal_len_limit, false);
+			reset_check_weight(&op, normal_len_limit + 100, false);
+			reset_check_weight(&op, operational_limit, false);
+			reset_check_weight(&op, operational_limit + 1, true);
 		})
 	}
 
@@ -1006,7 +1009,24 @@ mod tests {
 			};
 			// Should handle large lengths gracefully via saturating conversion
 			let large_len = usize::MAX;
+
+			// Weight proof size should equal u64::MAX (initial zero + u64::MAX)
 			let result = CheckWeight::<Test>::check_extrinsic_weight(&info_zero, large_len);
+			// This should fail because u64::MAX proof size exceeds limits
+			assert_err!(result, InvalidTransaction::ExhaustsResources);
+
+			// Test with very large length
+			let info_with_minimal_proof_size = DispatchInfo {
+				call_weight: Weight::from_parts(0, 10),
+				class: DispatchClass::Normal,
+				..Default::default()
+			};
+
+			// Weight proof size saturates at u64::MAX (initial 10 + u64::MAX)
+			let result = CheckWeight::<Test>::check_extrinsic_weight(
+				&info_with_minimal_proof_size,
+				large_len,
+			);
 			// This should fail because u64::MAX proof size exceeds limits
 			assert_err!(result, InvalidTransaction::ExhaustsResources);
 		});

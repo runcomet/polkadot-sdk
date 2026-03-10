@@ -7,6 +7,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
+  workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -17,6 +18,37 @@ jobs:
   preflight:
     needs: isdraft
     uses: ./.github/workflows/reusable-preflight.yml
+
+  differential-tests:
+    needs: [preflight]
+    runs-on: ${{ needs.preflight.outputs.RUNNER }}
+    if: ${{ needs.preflight.outputs.changes_rust }}
+    timeout-minutes: 60
+    container:
+      image: ${{ needs.preflight.outputs.IMAGE }}
+    permissions:
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          ["revive-dev-node-revm-solc", "revive-dev-node-polkavm-resolc"]
+    steps:
+      - name: Checkout the Polkadot SDK
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Update the Installed Python
+        run: apt-get update && apt-get install -y python3-pip python3
+      - name: Install resolc
+        id: download
+        uses: ./.github/actions/get-resolc
+      - name: Run revive differential tests
+        uses: paritytech/revive-differential-tests/.github/actions/run-differential-tests@004a36f4e88228ee1331cb598c8873ab7315e3f0
+        with:
+          platform: ${{ matrix.platform }}
+          cargo-command: "forklift cargo"
+          revive-differential-tests-ref: "004a36f4e88228ee1331cb598c8873ab7315e3f0"
+          resolc-path: ${{ steps.download.outputs.resolc-path }}
+          expectations-file-path: ./.github/assets/${{ matrix.platform }}.json
 
   evm-test-suite:
     needs: [preflight]
@@ -30,9 +62,12 @@ jobs:
       # but still want to have debug assertions.
       RUSTFLAGS: "-C debug-assertions"
       RUST_BACKTRACE: 1
+    strategy:
+      matrix:
+        platform: ["test:pvm", "test:evm"]
     steps:
       - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: script
         run: |
@@ -40,13 +75,13 @@ jobs:
           forklift cargo build --locked --release -p revive-dev-node --bin revive-dev-node
 
       - name: Checkout evm-tests
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: paritytech/evm-test-suite
-          ref: c2422cace2fb8a4337fc1c704c49e458c8a79d6b
+          ref: 369d53dd76c8e2c7a30d7eefef03fa1728186c8a
           path: evm-test-suite
 
-      - uses: denoland/setup-deno@v1
+      - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
 
@@ -62,11 +97,8 @@ jobs:
           export ETH_RPC_PATH=$(readlink -f ../target/release/eth-rpc)
           echo $REVIVE_DEV_NODE_PATH $ETH_RPC_PATH
 
-          echo "== Running pvm tests ==j"
-          START_REVIVE_DEV_NODE=true START_ETH_RPC=true deno task test:pvm
-
-          echo "== Running evm tests =="
-          START_REVIVE_DEV_NODE=true START_ETH_RPC=true deno task test:evm
+          echo "== Running tests =="
+          START_REVIVE_DEV_NODE=true START_ETH_RPC=true deno task ${{ matrix.platform }}
 
   confirm-required-test-evm-jobs-passed:
     runs-on: ubuntu-latest
@@ -78,7 +110,7 @@ jobs:
     steps:
       - run: |
           tee resultfile <<< '${{ toJSON(needs) }}'
-          FAILURES=$(cat resultfile | grep '"result": "failure"' | wc -l)
+          FAILURES=$(cat resultfile | grep -E '"result": "(failure|cancelled)"' | wc -l)
           if [ $FAILURES -gt 0 ]; then
             echo "### At least one required job failed ❌" >> $GITHUB_STEP_SUMMARY
             exit 1

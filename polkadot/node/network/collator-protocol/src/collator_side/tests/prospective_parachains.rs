@@ -75,21 +75,7 @@ pub(super) async fn update_view(
 		let ancestry_numbers = (min_number..=leaf_number).rev();
 		let mut ancestry_iter = ancestry_hashes.clone().zip(ancestry_numbers).peekable();
 		if let Some((hash, number)) = ancestry_iter.next() {
-			assert_matches!(
-				overseer_recv_with_timeout(virtual_overseer, Duration::from_millis(50)).await.unwrap(),
-				AllMessages::ChainApi(ChainApiMessage::BlockHeader(.., tx)) => {
-					let header = Header {
-						parent_hash: get_parent_hash(hash),
-						number,
-						state_root: Hash::zero(),
-						extrinsics_root: Hash::zero(),
-						digest: Default::default(),
-					};
-
-					tx.send(Ok(Some(header))).unwrap();
-				}
-			);
-
+			// fetch_ancestors is called first, which requests session for the leaf
 			assert_matches!(
 				overseer_recv_with_timeout(virtual_overseer, Duration::from_millis(50)).await.unwrap(),
 				AllMessages::RuntimeApi(
@@ -135,20 +121,37 @@ pub(super) async fn update_view(
 					tx.send(Ok(hashes)).unwrap();
 				}
 			);
-		}
 
-		for _ in ancestry_iter.clone() {
+			// fetch_ancestors checks session for each ancestor
+			for _ in ancestry_iter.clone() {
+				assert_matches!(
+					overseer_recv_with_timeout(virtual_overseer, Duration::from_millis(50)).await.unwrap(),
+					AllMessages::RuntimeApi(
+						RuntimeApiMessage::Request(
+							..,
+							RuntimeApiRequest::SessionIndexForChild(
+								tx
+							)
+						)
+					) => {
+						tx.send(Ok(1)).unwrap();
+					}
+				);
+			}
+
+			// Now fetch_fresh_leaf_and_insert_ancestry requests block headers
 			assert_matches!(
 				overseer_recv_with_timeout(virtual_overseer, Duration::from_millis(50)).await.unwrap(),
-				AllMessages::RuntimeApi(
-					RuntimeApiMessage::Request(
-						..,
-						RuntimeApiRequest::SessionIndexForChild(
-							tx
-						)
-					)
-				) => {
-					tx.send(Ok(1)).unwrap();
+				AllMessages::ChainApi(ChainApiMessage::BlockHeader(.., tx)) => {
+					let header = Header {
+						parent_hash: get_parent_hash(hash),
+						number,
+						state_root: Hash::zero(),
+						extrinsics_root: Hash::zero(),
+						digest: Default::default(),
+					};
+
+					tx.send(Ok(Some(header))).unwrap();
 				}
 			);
 		}
@@ -162,7 +165,7 @@ pub(super) async fn update_view(
 			let Some(msg) =
 				overseer_peek_with_timeout(virtual_overseer, Duration::from_millis(50)).await
 			else {
-				return
+				return;
 			};
 
 			if !matches!(
@@ -171,7 +174,7 @@ pub(super) async fn update_view(
 					if *_hash == hash
 			) {
 				// Ancestry has already been cached for this leaf.
-				break
+				break;
 			}
 
 			assert_matches!(
@@ -220,8 +223,14 @@ pub(super) async fn update_view(
 						_,
 						RuntimeApiRequest::SessionIndexForChild(_),
 					))
+				) && !matches!(
+					&msg,
+					AllMessages::RuntimeApi(RuntimeApiMessage::Request(
+						_,
+						RuntimeApiRequest::NodeFeatures(_, _),
+					))
 				) {
-					break
+					break;
 				}
 
 				if matches!(
@@ -256,6 +265,12 @@ pub(super) async fn update_view(
 						RuntimeApiRequest::CandidateEvents(tx),
 					)) => {
 						tx.send(Ok(vec![])).unwrap();
+					},
+					AllMessages::RuntimeApi(RuntimeApiMessage::Request(
+						_,
+						RuntimeApiRequest::NodeFeatures(_, tx),
+					)) => {
+						tx.send(Ok(NodeFeatures::EMPTY)).unwrap();
 					},
 					_ => {
 						unimplemented!()
@@ -340,6 +355,8 @@ fn distribute_collation_from_implicit_view(#[case] validator_sends_view_first: b
 		ReputationAggregator::new(|_| true),
 		|mut test_harness| async move {
 			let virtual_overseer = &mut test_harness.virtual_overseer;
+
+			overseer_send(virtual_overseer, CollatorProtocolMessage::ConnectToBackingGroups).await;
 
 			// Set collating para id.
 			overseer_send(virtual_overseer, CollatorProtocolMessage::CollateOn(test_state.para_id))
@@ -515,6 +532,8 @@ fn distribute_collation_up_to_limit() {
 			// Grandparent of head `a`.
 			let head_b = Hash::from_low_u64_be(130);
 
+			overseer_send(virtual_overseer, CollatorProtocolMessage::ConnectToBackingGroups).await;
+
 			// Set collating para id.
 			overseer_send(virtual_overseer, CollatorProtocolMessage::CollateOn(test_state.para_id))
 				.await;
@@ -642,6 +661,9 @@ fn send_parent_head_data_for_elastic_scaling() {
 			let head_b = Hash::from_low_u64_be(129);
 			let head_b_num: u32 = 63;
 
+			overseer_send(&mut virtual_overseer, CollatorProtocolMessage::ConnectToBackingGroups)
+				.await;
+
 			// Set collating para id.
 			overseer_send(
 				&mut virtual_overseer,
@@ -711,7 +733,7 @@ fn send_parent_head_data_for_elastic_scaling() {
 				.send(RawIncomingRequest {
 					peer,
 					payload: CollationFetchingRequest {
-						relay_parent: head_b,
+						scheduling_parent: head_b,
 						para_id: test_state.para_id,
 						candidate_hash: candidate.hash(),
 					}
@@ -769,6 +791,9 @@ fn advertise_and_send_collation_by_hash() {
 			// Parent of head `a`.
 			let head_b = Hash::from_low_u64_be(129);
 			let head_b_num: u32 = 63;
+
+			overseer_send(&mut virtual_overseer, CollatorProtocolMessage::ConnectToBackingGroups)
+				.await;
 
 			// Set collating para id.
 			overseer_send(
@@ -843,7 +868,7 @@ fn advertise_and_send_collation_by_hash() {
 					.send(RawIncomingRequest {
 						peer,
 						payload: CollationFetchingRequest {
-							relay_parent: head_b,
+							scheduling_parent: head_b,
 							para_id: test_state.para_id,
 							candidate_hash: candidate.hash(),
 						}

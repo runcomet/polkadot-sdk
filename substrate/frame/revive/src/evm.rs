@@ -14,7 +14,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//!Types, and traits to integrate pallet-revive with EVM.
+//! Types, and traits to integrate pallet-revive with EVM.
 #![warn(missing_docs)]
 
 mod api;
@@ -34,5 +34,9 @@ pub use block_hash::ReceiptGasInfo;
 
 /// Ethereum block storage module.
 pub(crate) mod block_storage;
+
+/// Transfer with dust functionality.
+mod transfer_with_dust;
+pub(crate) use transfer_with_dust::*;
 
 type OnChargeTransactionBalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as pallet_transaction_payment::OnChargeTransaction<T>>::Balance;

@@ -16,16 +16,21 @@
 // limitations under the License.
 
 use crate::{
+	ClientError,
 	client::Balance,
 	subxt_client::{self, SrcChainConfig},
-	ClientError,
 };
+use futures::TryFutureExt;
 use pallet_revive::{
-	evm::{Block as EthBlock, GenericTransaction, ReceiptGasInfo, Trace, H160, U256},
-	EthTransactInfo,
+	DryRunConfig, EthTransactInfo,
+	evm::{
+		Block as EthBlock, BlockNumberOrTagOrHash, BlockTag, GenericTransaction, H160,
+		ReceiptGasInfo, Trace, U256,
+	},
 };
 use sp_core::H256;
-use subxt::OnlineClient;
+use sp_timestamp::Timestamp;
+use subxt::{Error::Metadata, OnlineClient, error::MetadataError, ext::subxt_rpcs::UserError};
 
 const LOG_TARGET: &str = "eth-rpc::runtime_api";
 
@@ -65,9 +70,49 @@ impl RuntimeApi {
 	pub async fn dry_run(
 		&self,
 		tx: GenericTransaction,
+		block: BlockNumberOrTagOrHash,
 	) -> Result<EthTransactInfo<Balance>, ClientError> {
-		let payload = subxt_client::apis().revive_api().eth_transact(tx.into());
-		let result = self.0.call(payload).await?;
+		let timestamp_override = match block {
+			BlockNumberOrTagOrHash::BlockTag(BlockTag::Pending) => {
+				Some(Timestamp::current().as_millis())
+			},
+			_ => None,
+		};
+
+		let payload = subxt_client::apis()
+			.revive_api()
+			.eth_transact_with_config(
+				tx.clone().into(),
+				DryRunConfig::new(timestamp_override).into(),
+			)
+			.unvalidated();
+
+		let result = self
+			.0
+			.call(payload)
+			.or_else(|err| async {
+				match err {
+					// This will be hit if subxt metadata (subxt uses the latest finalized block
+					// metadata when the eth-rpc starts) does not contain the new method
+					Metadata(MetadataError::RuntimeMethodNotFound(name)) => {
+						log::debug!(target: LOG_TARGET, "Method {name:?} not found falling back to eth_transact");
+						let payload = subxt_client::apis().revive_api().eth_transact(tx.into());
+						self.0.call(payload).await
+					},
+					// This will be hit if we are trying to hit a block where the runtime did not
+					// have this new runtime `eth_transact_with_config` defined
+					subxt::Error::Rpc(subxt::error::RpcError::ClientError(
+						subxt::ext::subxt_rpcs::Error::User(UserError { message, .. }),
+					)) if message.contains("eth_transact_with_config is not found") => {
+						log::debug!(target: LOG_TARGET, "{message:?} not found falling back to eth_transact");
+						let payload = subxt_client::apis().revive_api().eth_transact(tx.into());
+						self.0.call(payload).await
+					},
+					e => Err(e),
+				}
+			})
+			.await?;
+
 		match result {
 			Err(err) => {
 				log::debug!(target: LOG_TARGET, "Dry run failed {err:?}");

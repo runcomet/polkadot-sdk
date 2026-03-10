@@ -22,10 +22,9 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use codec::{Compact, Decode, DecodeAll, DecodeWithMemTracking, Encode, MaxEncodedLen};
-use core::time::Duration;
 use polkadot_parachain_primitives::primitives::HeadData;
 use scale_info::TypeInfo;
-use sp_runtime::RuntimeDebug;
+use Debug;
 
 /// The ref time per core in seconds.
 ///
@@ -64,7 +63,7 @@ pub type InboundHrmpMessage = polkadot_primitives::InboundHrmpMessage<relay_chai
 pub type OutboundHrmpMessage = polkadot_primitives::OutboundHrmpMessage<ParaId>;
 
 /// Error description of a message send failure.
-#[derive(Eq, PartialEq, Copy, Clone, RuntimeDebug, Encode, Decode)]
+#[derive(Eq, PartialEq, Copy, Clone, Debug, Encode, Decode)]
 pub enum MessageSendError {
 	/// The dispatch queue is full.
 	QueueFull,
@@ -206,7 +205,7 @@ impl XcmpMessageSource for () {
 }
 
 /// The "quality of service" considerations for message sending.
-#[derive(Eq, PartialEq, Clone, Copy, Encode, Decode, RuntimeDebug)]
+#[derive(Eq, PartialEq, Clone, Copy, Encode, Decode, Debug)]
 pub enum ServiceQuality {
 	/// Ensure that this message is dispatched in the same relative order as any other messages
 	/// that were also sent with `Ordered`. This only guarantees message ordering on the dispatch
@@ -281,7 +280,7 @@ impl CumulusDigestItem {
 				let Ok(CumulusDigestItem::CoreInfo(core_info)) =
 					CumulusDigestItem::decode_all(&mut &val[..])
 				else {
-					return None
+					return None;
 				};
 
 				Some(core_info)
@@ -327,7 +326,7 @@ impl CumulusDigestItem {
 				let Ok(CumulusDigestItem::RelayParent(hash)) =
 					CumulusDigestItem::decode_all(&mut &val[..])
 				else {
-					return None
+					return None;
 				};
 
 				Some(RelayBlockIdentifier::ByHash(hash))
@@ -336,7 +335,7 @@ impl CumulusDigestItem {
 				let Ok((storage_root, block_number)) =
 					rpsr_digest::RpsrType::decode_all(&mut &val[..])
 				else {
-					return None
+					return None;
 				};
 
 				Some(RelayBlockIdentifier::ByStorageRoot {
@@ -349,16 +348,16 @@ impl CumulusDigestItem {
 	}
 }
 
-///
 /// If there are multiple valid digests, this returns the value of the first one, although
 /// well-behaving runtimes should not produce headers with more than one.
 pub fn extract_relay_parent(digest: &Digest) -> Option<relay_chain::Hash> {
 	digest.convert_first(|d| match d {
-		DigestItem::Consensus(id, val) if id == &CUMULUS_CONSENSUS_ID =>
+		DigestItem::Consensus(id, val) if id == &CUMULUS_CONSENSUS_ID => {
 			match CumulusDigestItem::decode(&mut &val[..]) {
 				Ok(CumulusDigestItem::RelayParent(hash)) => Some(hash),
 				_ => None,
-			},
+			}
+		},
 		_ => None,
 	})
 }
@@ -467,44 +466,31 @@ pub struct CollationInfo {
 	pub head_data: HeadData,
 }
 
-/// The schedule for the next relay chain slot.
-///
-/// Returns the maximum number of parachain blocks to produce and the block time per block to use.
-#[derive(Clone, Debug, codec::Decode, codec::Encode, PartialEq, TypeInfo)]
-pub struct NextSlotSchedule {
-	/// The maximum number of blocks to produce in the relay chain slot.
-	///
-	/// The node is free to produce less blocks.
-	pub number_of_blocks: u32,
-	/// The target block time in wall clock time for each block.
-	///
-	/// The maximum should be [`REF_TIME_PER_CORE_IN_SECS`] or otherwise blocks may fail to
-	/// validate on the relay chain.
-	pub block_time: Duration,
+/// A relay chain storage key to be included in the storage proof.
+#[derive(Clone, Debug, Encode, Decode, TypeInfo, PartialEq, Eq)]
+pub enum RelayStorageKey {
+	/// Top-level relay chain storage key.
+	Top(Vec<u8>),
+	/// Child trie storage key.
+	Child {
+		/// Unprefixed storage key identifying the child trie root location.
+		/// Prefix `:child_storage:default:` is added when accessing storage.
+		/// Used to derive `ChildInfo` for reading child trie data.
+		/// Usage: let child_info = ChildInfo::new_default(&storage_key);
+		storage_key: Vec<u8>,
+		/// Key within the child trie.
+		key: Vec<u8>,
+	},
 }
 
-impl NextSlotSchedule {
-	/// Creates a schedule that produces one block, occupying an entire core.
-	pub fn one_block_using_one_core() -> Self {
-		Self { number_of_blocks: 1, block_time: Duration::from_secs(REF_TIME_PER_CORE_IN_SECS) }
-	}
-
-	/// A schedule that maps `x` blocks onto `y` cores.
-	pub fn x_blocks_using_y_cores(blocks: u32, cores: u32) -> Self {
-		let ref_time_per_core = Duration::from_secs(REF_TIME_PER_CORE_IN_SECS);
-
-		if blocks == 0 || cores == 0 {
-			return Self { number_of_blocks: 0, block_time: Duration::from_secs(0) }
-		}
-
-		// In wall clock time we can not go above `6s` (relay chain slot duration), so we need to
-		// cap there.
-		let block_time = (ref_time_per_core * cores).min(Duration::from_secs(6)) / blocks;
-		// One block can at max occupy one core.
-		let block_time = block_time.min(ref_time_per_core);
-
-		Self { block_time, number_of_blocks: blocks }
-	}
+/// Request for proving relay chain storage data.
+///
+/// Contains a list of storage keys (either top-level or child trie keys)
+/// to be included in the relay chain state proof.
+#[derive(Clone, Debug, Encode, Decode, TypeInfo, PartialEq, Eq, Default)]
+pub struct RelayProofRequest {
+	/// Storage keys to include in the relay chain state proof.
+	pub keys: Vec<RelayStorageKey>,
 }
 
 sp_api::decl_runtime_apis! {
@@ -540,117 +526,29 @@ sp_api::decl_runtime_apis! {
 		fn relay_parent_offset() -> u32;
 	}
 
-	/// API for parachain slot scheduling.
+	/// API for parachain target block rate.
 	///
-	/// This runtime API allows the parachain runtime to communicate the block interval
-	/// to the node side. The node will call this API every relay chain slot (~6 seconds)
-	/// to get the scheduled parachain block interval.
-	pub trait SlotSchedule {
-		/// Get the block production schedule for the next relay chain slot.
+	/// This runtime API allows the parachain runtime to communicate the target block rate
+	/// to the node side. The target block rate is always valid for the next relay chain slot.
+	///
+	/// The runtime can not enforce this target block rate. It only acts as a maximum, but not more.
+	/// In the end it depends on the collator how many blocks will be produced. If there are no cores
+	/// available or the collator is offline, no blocks at all will be produced.
+	pub trait TargetBlockRate {
+		/// Get the target block rate for this parachain.
 		///
-		/// - `num_cores`: The number of cores assigned to this parachain
+		/// Returns the target number of blocks per relay chain slot.
+		fn target_block_rate() -> u32;
+	}
+
+	/// API for specifying which relay chain storage data to include in storage proofs.
+	///
+	/// This API allows parachains to request both top-level relay chain storage keys
+	/// and child trie storage keys to be included in the relay chain state proof.
+	pub trait KeyToIncludeInRelayProof {
+		/// Returns relay chain storage proof requests.
 		///
-		/// Returns a [`NextSlotSchedule`].
-		fn next_slot_schedule(num_cores: u32) -> NextSlotSchedule;
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn one_block_using_one_core_works() {
-		let schedule = NextSlotSchedule::one_block_using_one_core();
-		assert_eq!(schedule.number_of_blocks, 1);
-		assert_eq!(schedule.block_time, Duration::from_secs(REF_TIME_PER_CORE_IN_SECS));
-	}
-
-	#[test]
-	fn x_blocks_using_y_cores_basic_functionality() {
-		// 2 blocks using 1 core: each block gets 1 second
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(2, 1);
-		assert_eq!(schedule.number_of_blocks, 2);
-		assert_eq!(schedule.block_time, Duration::from_secs(1));
-
-		// 4 blocks using 2 cores: each block gets 1 second
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(4, 2);
-		assert_eq!(schedule.number_of_blocks, 4);
-		assert_eq!(schedule.block_time, Duration::from_secs(1));
-
-		// 2 blocks using 2 cores: each block gets 2 seconds (max)
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(2, 2);
-		assert_eq!(schedule.number_of_blocks, 2);
-		assert_eq!(schedule.block_time, Duration::from_secs(2));
-	}
-
-	#[test]
-	fn x_blocks_using_y_cores_caps_block_time_at_ref_time() {
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(2, 10);
-		assert_eq!(schedule.number_of_blocks, 2);
-		assert_eq!(schedule.block_time, Duration::from_secs(REF_TIME_PER_CORE_IN_SECS));
-
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(1, 5);
-		assert_eq!(schedule.number_of_blocks, 1);
-		assert_eq!(schedule.block_time, Duration::from_secs(REF_TIME_PER_CORE_IN_SECS));
-	}
-
-	#[test]
-	fn x_blocks_using_y_cores_edge_cases() {
-		// Zero blocks
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(0, 1);
-		assert_eq!(schedule.number_of_blocks, 0);
-		assert_eq!(schedule.block_time, Duration::from_secs(0));
-
-		// Zero cores (should not panic, though not realistic)
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(2, 0);
-		assert_eq!(schedule.number_of_blocks, 0);
-		assert_eq!(schedule.block_time, Duration::from_secs(0));
-
-		// Large numbers
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(100, 50);
-		assert_eq!(schedule.number_of_blocks, 100);
-		assert_eq!(schedule.block_time, Duration::from_millis(60));
-	}
-
-	#[test]
-	fn x_blocks_using_y_cores_various_ratios() {
-		// 6 blocks, 3 cores: each block gets 1 second
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(6, 3);
-		assert_eq!(schedule.number_of_blocks, 6);
-		assert_eq!(schedule.block_time, Duration::from_secs(1));
-
-		// 8 blocks, 4 cores: each block gets 1 second
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(8, 4);
-		assert_eq!(schedule.number_of_blocks, 8);
-		assert_eq!(schedule.block_time, Duration::from_millis(750));
-
-		// 4 blocks, 8 cores: each block gets 2 seconds (capped)
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(4, 8);
-		assert_eq!(schedule.number_of_blocks, 4);
-		assert_eq!(schedule.block_time, Duration::from_millis(1500));
-
-		// 10 blocks, 2 cores: each block gets `400ms`
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(10, 2);
-		assert_eq!(schedule.number_of_blocks, 10);
-		assert_eq!(schedule.block_time, Duration::from_millis(400));
-	}
-
-	#[test]
-	fn x_blocks_using_y_cores_fractional_seconds() {
-		// 6 blocks, 1 core: each block gets `333.333... ms (2000ms / 6)`
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(6, 1);
-		assert_eq!(schedule.number_of_blocks, 6);
-		assert_eq!(schedule.block_time, Duration::from_nanos(333_333_333));
-
-		// 8 blocks, 1 core: each block gets `250ms`
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(8, 1);
-		assert_eq!(schedule.number_of_blocks, 8);
-		assert_eq!(schedule.block_time, Duration::from_millis(250));
-
-		// 12 blocks, 1 core: each block gets `~166.666ms`
-		let schedule = NextSlotSchedule::x_blocks_using_y_cores(12, 1);
-		assert_eq!(schedule.number_of_blocks, 12);
-		assert_eq!(schedule.block_time, Duration::from_nanos(166_666_666));
+		/// The collator will include them in the relay chain proof that is passed alongside the parachain inherent into the runtime.
+		fn keys_to_prove() -> RelayProofRequest;
 	}
 }
