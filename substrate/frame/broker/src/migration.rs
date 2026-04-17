@@ -433,7 +433,6 @@ pub mod v5 {
 
                 let config = Configuration::<T>::get()
                     .expect("Configuration must exist if SaleInfo exists; qed");
-                weight.saturating_add(T::DbWeight::get().reads(1));
 
                 let cycle_length = config.interlude_length
                     .saturating_add(config.leadin_length);
@@ -476,7 +475,6 @@ pub mod v5 {
                     sale_index,
                 };
                 SaleInfo::<T>::put(updated_sale);
-                weight.saturating_add(T::DbWeight::get().writes(1));
 
                 log::info!(
                     target: LOG_TARGET,
@@ -489,7 +487,7 @@ pub mod v5 {
                     "No SaleInfo found, skipping v5 migration",
                 );
             }
-            weight
+            weight.saturating_add(T::DbWeight::get().writes(2))
         }
 
         #[cfg(feature = "try-runtime")]
