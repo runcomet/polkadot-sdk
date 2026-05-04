@@ -141,7 +141,7 @@ pub mod pallet {
 		/// the `create_collection_with_id` function. However, if the `Incrementable` trait
 		/// implementation has an incremental order, the `create_collection_with_id` function
 		/// should not be used as it can claim a value in the ID sequence.
-		type CollectionId: Member + Parameter + MaxEncodedLen + Copy + Incrementable;
+		type CollectionId: Member + Parameter + MaxEncodedLen + Copy + Incrementable + PartialOrd;
 
 		/// The type used to identify a unique item within a collection.
 		type ItemId: Member + Parameter + MaxEncodedLen + Copy;
@@ -1951,7 +1951,6 @@ pub mod pallet {
 
 			let owner = res.0;
 
-			// Ensure the collection ID isn't already in use
 			ensure!(
 				!Collection::<T, I>::contains_key(&collection),
 				Error::<T, I>::CollectionIdInUse
@@ -1959,7 +1958,6 @@ pub mod pallet {
 
 			let admin = T::Lookup::lookup(admin)?;
 
-			// DepositRequired can be disabled by calling the force_create() only
 			ensure!(
 				!config.has_disabled_setting(CollectionSetting::DepositRequired),
 				Error::<T, I>::WrongSetting
@@ -1973,6 +1971,14 @@ pub mod pallet {
 				T::CollectionDeposit::get(),
 				Event::Created { collection, creator: owner, owner: admin },
 			)?;
+
+			if let Some(next) = NextCollectionId::<T, I>::get() {
+				if collection >= next {
+					NextCollectionId::<T, I>::put(
+						collection.increment().ok_or(Error::<T, I>::UnknownCollection)?,
+					);
+				}
+			}
 
 			Ok(())
 		}

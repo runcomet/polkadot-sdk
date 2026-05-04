@@ -70,16 +70,10 @@ impl EnsureOrigin<RuntimeOrigin> for EnsureSignedWithIdOrigin {
 	type Success = (AccountId, u32);
 
 	fn try_origin(o: RuntimeOrigin) -> Result<Self::Success, RuntimeOrigin> {
-		// For cases where no argument is provided, we need to get the collection ID
-		// from somewhere. Since this shouldn't be used directly with CreateOriginWithId,
-		// we'll just use the next available ID for completeness.
 		if let Ok(who) = frame_system::ensure_signed(o.clone()) {
-			let next_id = NextCollectionId::<Test>::get().unwrap_or(0u32);
-			return Ok((who, next_id));
-		}
-		if let Ok(()) = frame_system::ensure_root(o.clone()) {
-			let next_id = NextCollectionId::<Test>::get().unwrap_or(0u32);
-			return Ok((AccountId::from([0; 32]), next_id));
+			let bytes: [u8; 32] = who.into();
+			let id = bytes[0] as u32;
+			return Ok((AccountId::from(bytes), id));
 		}
 		Err(o)
 	}

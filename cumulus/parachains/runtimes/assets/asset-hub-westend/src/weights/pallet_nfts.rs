@@ -772,4 +772,8 @@ impl<T: frame_system::Config> pallet_nfts::WeightInfo for WeightInfo<T> {
 			.saturating_add(T::DbWeight::get().writes((1_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 2954).saturating_mul(n.into()))
 	}
+
+    fn create_with_id() -> Weight {
+        Weight::zero()
+    }
 }
