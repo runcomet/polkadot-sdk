@@ -103,6 +103,21 @@ pub trait Verifier<B: BlockT>: Send + Sync {
 	async fn verify(&self, block: BlockImportParams<B>) -> Result<BlockImportParams<B>, String>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImportQueueInfo {
+    /// Number of blocks currently waiting to be imported.
+    pub queued_blocks: usize,
+    /// Maximum number of blocks before the queue is considered under pressure.
+    pub max_queued_blocks: usize,
+}
+
+impl ImportQueueInfo {
+    /// Returns true if the queue has reached the pressure threshold.
+    pub fn is_under_pressure(&self) -> bool {
+        self.queued_blocks >= self.max_queued_blocks
+    }
+}
+
 /// Blocks import queue API.
 ///
 /// The `import_*` methods can be called in order to send elements for the import queue to verify.
@@ -119,6 +134,9 @@ pub trait ImportQueueService<B: BlockT>: Send {
 		number: NumberFor<B>,
 		justifications: Justifications,
 	);
+
+    /// Returns information about the current import queue state.
+    fn queue_info(&self) -> ImportQueueInfo;
 }
 
 #[async_trait::async_trait]
