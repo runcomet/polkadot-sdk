@@ -1190,12 +1190,12 @@ impl EnsureOrigin<RuntimeOrigin> for EnsureSignedOrRootWithId {
 		}
 		Err(o)
 	}
- 
-    #[cfg(feature = "runtime-benchmarks")] 
-    fn try_successful_origin() -> Result<RuntimeOrigin, ()> { 
-        let caller: AccountId = [0u8; 32].into();
-        Ok(RuntimeOrigin::from(frame_system::RawOrigin::Signed(caller))) 
-    }
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn try_successful_origin() -> Result<RuntimeOrigin, ()> {
+		let caller: AccountId = [0u8; 32].into();
+		Ok(RuntimeOrigin::from(frame_system::RawOrigin::Signed(caller)))
+	}
 }
 
 impl pallet_nfts::Config for Runtime {
@@ -1204,7 +1204,7 @@ impl pallet_nfts::Config for Runtime {
 	type ItemId = ItemId;
 	type Currency = Balances;
 	type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
-	type CreateOriginWithId = EnsureSignedOrRootWithId;
+	type NextId = pallet_nfts::IncrementalNextId<Runtime>;
 	type ForceOrigin = AssetsForceOrigin;
 	type Locker = ();
 	type CollectionDeposit = NftsCollectionDeposit;

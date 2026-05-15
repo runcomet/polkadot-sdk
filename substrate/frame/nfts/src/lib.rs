@@ -52,9 +52,13 @@ extern crate alloc;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use codec::{Decode, Encode};
-use frame_support::traits::{
-	tokens::Locker, BalanceStatus::Reserved, Currency, EnsureOriginWithArg, Incrementable,
-	ReservableCurrency,
+use frame_support::{
+	pallet_prelude::{DispatchError, MaxEncodedLen, Member},
+	traits::{
+		tokens::Locker, BalanceStatus::Reserved, Currency, EnsureOriginWithArg, Incrementable,
+		ReservableCurrency,
+	},
+	Parameter,
 };
 use frame_system::Config as SystemConfig;
 use sp_runtime::{
@@ -71,6 +75,29 @@ pub const LOG_TARGET: &'static str = "runtime::nfts";
 
 /// A type alias for the account ID type used in the dispatchable functions of this pallet.
 type AccountIdLookupOf<T> = <<T as SystemConfig>::Lookup as StaticLookup>::Source;
+
+impl<T: pallet::Config<I>, I: 'static> NextCollectionIdProvider for IncrementalNextId<T, I> {
+	type Id = T::CollectionId;
+
+	fn next() -> Result<Self::Id, DispatchError> {
+		let id = pallet::NextCollectionId::<T, I>::get()
+			.or(Self::Id::initial_value())
+			.ok_or(pallet::Error::<T, I>::UnknownCollection)?;
+		let next = id.increment().ok_or(pallet::Error::<T, I>::UnknownCollection)?;
+		pallet::NextCollectionId::<T, I>::put(next);
+		Ok(id)
+	}
+}
+
+impl<Id: Member + Parameter + MaxEncodedLen + Copy + Incrementable + PartialOrd>
+	NextCollectionIdProvider for DisabledNextId<Id>
+{
+	type Id = Id;
+
+	fn next() -> Result<Id, DispatchError> {
+		Err(DispatchError::Other("create() is disabled; use create_with_id()"))
+	}
+}
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -161,10 +188,10 @@ pub mod pallet {
 			Success = Self::AccountId,
 		>;
 
-		type CreateOriginWithId: EnsureOrigin<
-			Self::RuntimeOrigin,
-			Success = (Self::AccountId, Self::CollectionId),
-		>;
+		/// Controls how `create()` and `force_create()` generate collection IDs.
+		/// Use [`IncrementalNextId`] for standard behaviour or [`DisabledNextId`]
+		/// to forbid auto-creation and require `create_with_id()` instead.
+		type NextId: NextCollectionIdProvider<Id = Self::CollectionId>;
 
 		/// Locker trait to enable Locking mechanism downstream.
 		type Locker: Locker<Self::CollectionId, Self::ItemId>;
@@ -719,10 +746,7 @@ pub mod pallet {
 			admin: AccountIdLookupOf<T>,
 			config: CollectionConfigFor<T, I>,
 		) -> DispatchResult {
-			let collection = NextCollectionId::<T, I>::get()
-				.or(T::CollectionId::initial_value())
-				.ok_or(Error::<T, I>::UnknownCollection)?;
-
+			let collection = T::NextId::next()?;
 			let owner = T::CreateOrigin::ensure_origin(origin, &collection)?;
 			let admin = T::Lookup::lookup(admin)?;
 
@@ -740,8 +764,6 @@ pub mod pallet {
 				T::CollectionDeposit::get(),
 				Event::Created { collection, creator: owner, owner: admin },
 			)?;
-
-			Self::set_next_collection_id(collection);
 			Ok(())
 		}
 
@@ -769,11 +791,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::ForceOrigin::ensure_origin(origin)?;
 			let owner = T::Lookup::lookup(owner)?;
-
-			let collection = NextCollectionId::<T, I>::get()
-				.or(T::CollectionId::initial_value())
-				.ok_or(Error::<T, I>::UnknownCollection)?;
-
+			let collection = T::NextId::next()?;
 			Self::do_create_collection(
 				collection,
 				owner.clone(),
@@ -782,8 +800,6 @@ pub mod pallet {
 				Zero::zero(),
 				Event::ForceCreated { collection, owner },
 			)?;
-
-			Self::set_next_collection_id(collection);
 			Ok(())
 		}
 
@@ -1942,14 +1958,11 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::create_with_id())]
 		pub fn create_with_id(
 			origin: OriginFor<T>,
+			collection: T::CollectionId,
 			admin: AccountIdLookupOf<T>,
 			config: CollectionConfigFor<T, I>,
 		) -> DispatchResult {
-			let res = T::CreateOriginWithId::ensure_origin(origin)?;
-
-			let collection = res.1;
-
-			let owner = res.0;
+			let owner = T::CreateOrigin::ensure_origin(origin, &collection)?;
 
 			ensure!(
 				!Collection::<T, I>::contains_key(&collection),
@@ -1972,14 +1985,13 @@ pub mod pallet {
 				Event::Created { collection, creator: owner, owner: admin },
 			)?;
 
-			if let Some(next) = NextCollectionId::<T, I>::get() {
-				if collection >= next {
-					NextCollectionId::<T, I>::put(
-						collection.increment().ok_or(Error::<T, I>::UnknownCollection)?,
-					);
+			NextCollectionId::<T, I>::mutate(|maybe| {
+				if let Some(ref current) = *maybe {
+					if collection >= *current {
+						*maybe = collection.increment();
+					}
 				}
-			}
-
+			});
 			Ok(())
 		}
 	}

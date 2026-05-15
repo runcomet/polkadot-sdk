@@ -620,3 +620,17 @@ pub struct PreSignedAttributes<CollectionId, ItemId, AccountId, Deadline> {
 	/// A deadline for the signature.
 	pub deadline: Deadline,
 }
+
+pub trait NextCollectionIdProvider {
+	type Id: Member + Parameter + MaxEncodedLen + Copy + Incrementable + PartialOrd;
+
+	fn next() -> Result<Self::Id, DispatchError>;
+}
+
+/// Default implementation. Reads and increments the `NextCollectionId` storage item.
+/// Use this in any runtime that wants standard auto-incrementing behaviour.
+pub struct IncrementalNextId<T, I = ()>(core::marker::PhantomData<(T, I)>);
+
+/// Use this when the runtime only uses `create_with_id()`.
+/// Makes `create()` and `force_create()` return an error.
+pub struct DisabledNextId<Id>(core::marker::PhantomData<Id>);

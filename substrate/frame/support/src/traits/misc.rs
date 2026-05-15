@@ -17,9 +17,9 @@
 
 //! Smaller traits used in FRAME which don't need their own file.
 
-use crate::{traits::Incrementable, dispatch::{DispatchResult, Parameter}, pallet_prelude::Member};
+use crate::dispatch::{DispatchResult, Parameter};
 use alloc::{vec, vec::Vec};
-use codec::{Codec, CompactLen, Decode, DecodeLimit, Encode, EncodeLike, Input, MaxEncodedLen};
+use codec::{CompactLen, Decode, DecodeLimit, Encode, EncodeLike, Input, MaxEncodedLen};
 use impl_trait_for_tuples::impl_for_tuples;
 use scale_info::{build::Fields, meta_type, Path, Type, TypeInfo, TypeParameter};
 use sp_arithmetic::traits::{CheckedAdd, CheckedMul, CheckedSub, One, Saturating};
@@ -788,12 +788,6 @@ impl<T> IsType<T> for T {
 	fn into_mut(&mut self) -> &mut T {
 		self
 	}
-}
-
-pub trait NextId {
-    type Id: Member + Parameter + MaxEncodedLen + Copy + Incrementable + PartialOrd;
-
-    fn next() -> DispatchResult;
 }
 
 /// Something that can be checked to be a of sub type `T`.

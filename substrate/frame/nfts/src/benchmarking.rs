@@ -877,39 +877,44 @@ benchmarks_instance_pallet! {
 			.into(),
 		);
 	}
-
 	create_with_id {
 		let collection = T::Helper::collection(0);
 
 		ensure!(!Collection::<T, I>::contains_key(&collection), "Collection ID already in use");
 
-		let origin_with_id = T::CreateOriginWithId::try_successful_origin()
+		let origin = T::CreateOrigin::try_successful_origin(&collection)
 			.map_err(|_| BenchmarkError::Weightless)?;
 
-		let (owner, returned_collection) = T::CreateOriginWithId::ensure_origin(origin_with_id.clone())
+
+		let caller = T::CreateOrigin::ensure_origin(origin.clone(), &collection)
 			.map_err(|_| BenchmarkError::Weightless)?;
 
-		ensure!(returned_collection == collection, "Collection ID mismatch in benchmark");
 
-		let caller = owner.clone();
 		whitelist_account!(caller);
+
 
 		let admin_lookup = T::Lookup::unlookup(caller.clone());
 
+
 		T::Currency::make_free_balance_be(&caller, DepositBalanceOf::<T, I>::max_value());
+
 
 		let config = default_collection_config::<T, I>();
 
+
 		let call = Call::<T, I>::create_with_id {
+			collection,
 			admin: admin_lookup,
 			config,
 		};
-	}: { call.dispatch_bypass_filter(origin_with_id)? }
-	verify {
 
+	}: { call.dispatch_bypass_filter(origin)? }
+
+	verify {
 		assert!(Collection::<T, I>::contains_key(&collection));
 
 		let collection_details = Collection::<T, I>::get(&collection).unwrap();
+
 		assert_eq!(collection_details.owner, caller);
 
 		assert_last_event::<T, I>(

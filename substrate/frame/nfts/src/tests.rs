@@ -3922,6 +3922,7 @@ fn create_with_id_basic_should_work() {
 		// account(1) derives collection ID 1
 		assert_ok!(Nfts::create_with_id(
 			RuntimeOrigin::signed(owner.clone()),
+			1u32,
 			admin.clone(),
 			collection_config_with_all_settings_enabled()
 		));
@@ -3955,6 +3956,7 @@ fn create_with_id_collection_id_already_in_use() {
 		// account(1) claims ID 1
 		assert_ok!(Nfts::create_with_id(
 			RuntimeOrigin::signed(owner1.clone()),
+			1u32,
 			account(1),
 			collection_config_with_all_settings_enabled()
 		));
@@ -3963,6 +3965,7 @@ fn create_with_id_collection_id_already_in_use() {
 		assert_noop!(
 			Nfts::create_with_id(
 				RuntimeOrigin::signed(owner1.clone()),
+				1u32,
 				account(2),
 				collection_config_with_all_settings_enabled()
 			),
@@ -3985,6 +3988,7 @@ fn create_with_id_bumps_next_collection_id() {
 		// account(100) derives ID 100, which is > 5, so bump to 101
 		assert_ok!(Nfts::create_with_id(
 			RuntimeOrigin::signed(account(100)),
+			100u32,
 			account(100),
 			collection_config_with_all_settings_enabled()
 		));
@@ -4015,6 +4019,7 @@ fn create_with_id_does_not_bump_when_behind() {
 		// account(1) derives ID 1, which is < 10, so no bump
 		assert_ok!(Nfts::create_with_id(
 			RuntimeOrigin::signed(account(1)),
+			1u32,
 			account(1),
 			collection_config_with_all_settings_enabled()
 		));
@@ -4042,6 +4047,7 @@ fn create_with_id_rejects_disabled_deposit() {
 		assert_noop!(
 			Nfts::create_with_id(
 				RuntimeOrigin::signed(account(1)),
+				1u32,
 				account(1),
 				collection_config_from_disabled_settings(CollectionSetting::DepositRequired.into())
 			),
