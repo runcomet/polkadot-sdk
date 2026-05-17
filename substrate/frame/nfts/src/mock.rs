@@ -22,7 +22,6 @@ use crate as pallet_nfts;
 
 use frame_support::{
 	construct_runtime, derive_impl,
-	pallet_prelude::EnsureOrigin,
 	parameter_types,
 	traits::{AsEnsureOriginWithArg, ConstU32, ConstU64},
 };
@@ -62,27 +61,6 @@ impl pallet_balances::Config for Test {
 
 parameter_types! {
 	pub storage Features: PalletFeatures = PalletFeatures::all_enabled();
-}
-
-pub struct EnsureSignedWithIdOrigin;
-
-impl EnsureOrigin<RuntimeOrigin> for EnsureSignedWithIdOrigin {
-	type Success = (AccountId, u32);
-
-	fn try_origin(o: RuntimeOrigin) -> Result<Self::Success, RuntimeOrigin> {
-		if let Ok(who) = frame_system::ensure_signed(o.clone()) {
-			let bytes: [u8; 32] = who.into();
-			let id = bytes[0] as u32;
-			return Ok((AccountId::from(bytes), id));
-		}
-		Err(o)
-	}
-
-	#[cfg(feature = "runtime-benchmarks")]
-	fn try_successful_origin() -> Result<RuntimeOrigin, ()> {
-		let caller: AccountId = [0u8; 32].into();
-		Ok(RuntimeOrigin::from(frame_system::RawOrigin::Signed(caller)))
-	}
 }
 
 impl Config for Test {

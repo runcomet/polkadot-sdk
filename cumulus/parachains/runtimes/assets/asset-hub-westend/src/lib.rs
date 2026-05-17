@@ -133,9 +133,6 @@ use xcm::latest::prelude::{
 	NetworkId, ParentThen, Response, WeightLimit, XCM_VERSION,
 };
 
-use frame_support::pallet_prelude::EnsureOrigin;
-use frame_system::ensure_signed;
-
 /// Build with an offset of 1 behind the relay chain.
 const RELAY_PARENT_OFFSET: u32 = 1;
 
@@ -1177,25 +1174,6 @@ parameter_types! {
 	pub const NftsMetadataDepositBase: Balance = UniquesMetadataDepositBase::get();
 	pub const NftsAttributeDepositBase: Balance = UniquesAttributeDepositBase::get();
 	pub const NftsDepositPerByte: Balance = UniquesDepositPerByte::get();
-}
-
-pub struct EnsureSignedOrRootWithId;
-
-impl EnsureOrigin<RuntimeOrigin> for EnsureSignedOrRootWithId {
-	type Success = (AccountId, CollectionId);
-
-	fn try_origin(o: RuntimeOrigin) -> Result<Self::Success, RuntimeOrigin> {
-		if let Ok(who) = ensure_signed(o.clone()) {
-			return Ok((who, 0u32)); // Note: Collection ID will be set by the extrinsic
-		}
-		Err(o)
-	}
-
-	#[cfg(feature = "runtime-benchmarks")]
-	fn try_successful_origin() -> Result<RuntimeOrigin, ()> {
-		let caller: AccountId = [0u8; 32].into();
-		Ok(RuntimeOrigin::from(frame_system::RawOrigin::Signed(caller)))
-	}
 }
 
 impl pallet_nfts::Config for Runtime {

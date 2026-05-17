@@ -138,10 +138,7 @@ use impls::AllianceProposalProvider;
 
 /// Constant values used within the runtime.
 pub mod constants;
-use crate::{
-	parachains_common_types::CollectionId,
-	polkadot_sdk_frame::{runtime::prelude::ensure_signed, traits::EnsureOrigin},
-};
+
 use constants::{currency::*, time::*};
 use sp_runtime::generic::Era;
 
@@ -2202,26 +2199,6 @@ impl pallet_nft_fractionalization::Config for Runtime {
 parameter_types! {
 	pub Features: PalletFeatures = PalletFeatures::all_enabled();
 	pub const MaxAttributesPerCall: u32 = 10;
-}
-
-pub struct EnsureSignedOrRootWithId;
-
-impl EnsureOrigin<RuntimeOrigin> for EnsureSignedOrRootWithId {
-	type Success = (AccountId, CollectionId);
-
-	fn try_origin(o: RuntimeOrigin) -> Result<Self::Success, RuntimeOrigin> {
-		if let Ok(who) = ensure_signed(o.clone()) {
-			return Ok((who, 0u32)); // Note: Collection ID will be set by the extrinsic
-		}
-
-		Err(o)
-	}
-
-	#[cfg(feature = "runtime-benchmarks")]
-	fn try_successful_origin() -> Result<RuntimeOrigin, ()> {
-		let caller: AccountId = [0u8; 32].into();
-		Ok(RuntimeOrigin::from(frame_system::RawOrigin::Signed(caller)))
-	}
 }
 
 impl pallet_nfts::Config for Runtime {
