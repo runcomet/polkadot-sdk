@@ -1977,7 +1977,7 @@ pub mod pallet {
 			);
 
 			Self::do_create_collection(
-				collection.clone(),
+				collection,
 				owner.clone(),
 				admin.clone(),
 				config,

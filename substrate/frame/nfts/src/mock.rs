@@ -21,8 +21,7 @@ use super::*;
 use crate as pallet_nfts;
 
 use frame_support::{
-	construct_runtime, derive_impl,
-	parameter_types,
+	construct_runtime, derive_impl, parameter_types,
 	traits::{AsEnsureOriginWithArg, ConstU32, ConstU64},
 };
 use sp_keystore::{testing::MemoryKeystore, KeystoreExt};
