@@ -3876,41 +3876,6 @@ fn clear_collection_metadata_works() {
 	});
 }
 
-// #[test]
-// fn create_with_id_basic_should_work() {
-// new_test_ext().execute_with(|| {
-// let collection_id = 42;
-// let owner = account(1);
-// let admin = account(2);
-//
-// Balances::make_free_balance_be(&owner, 100);
-//
-// NextCollectionId::<Test>::set(Some(collection_id));
-//
-// Create collection with specific ID
-// assert_ok!(Nfts::create_with_id(
-// RuntimeOrigin::signed(owner.clone()),
-// account(2),
-// collection_config_with_all_settings_enabled()
-// ));
-//
-// assert_eq!(collections(), vec![(owner.clone(), collection_id)]);
-//
-// let collection = Collection::<Test>::get(collection_id).unwrap();
-// assert_eq!(collection.owner, owner);
-// assert_eq!(collection.owner_deposit, 2);
-//
-// let config = CollectionConfigOf::<Test>::get(collection_id).unwrap();
-// assert_eq!(config, collection_config_with_all_settings_enabled());
-//
-// assert!(events().contains(&Event::<Test>::Created {
-// collection: collection_id,
-// creator: owner,
-// owner: admin,
-// }));
-// });
-// }
-
 #[test]
 fn create_with_id_basic_should_work() {
 	new_test_ext().execute_with(|| {
@@ -3919,7 +3884,7 @@ fn create_with_id_basic_should_work() {
 
 		Balances::make_free_balance_be(&owner, 100);
 
-		// account(1) derives collection ID 1
+		// account(1) claims ID 1
 		assert_ok!(Nfts::create_with_id(
 			RuntimeOrigin::signed(owner.clone()),
 			1u32,
@@ -4016,7 +3981,7 @@ fn create_with_id_does_not_bump_when_behind() {
 		// Advance NextCollectionId to 10
 		NextCollectionId::<Test>::set(Some(10));
 
-		// account(1) derives ID 1, which is < 10, so no bump
+		// account(1) claims ID 1, which is < 10, so no bump
 		assert_ok!(Nfts::create_with_id(
 			RuntimeOrigin::signed(account(1)),
 			1u32,
