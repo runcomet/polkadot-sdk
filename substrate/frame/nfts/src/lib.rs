@@ -764,6 +764,10 @@ pub mod pallet {
 				T::CollectionDeposit::get(),
 				Event::Created { collection, creator: owner, owner: admin },
 			)?;
+
+			let next_id = NextCollectionId::<T, I>::get();
+			Self::deposit_event(Event::NextCollectionIdIncremented { next_id });
+
 			Ok(())
 		}
 
@@ -800,6 +804,9 @@ pub mod pallet {
 				Zero::zero(),
 				Event::ForceCreated { collection, owner },
 			)?;
+			let next_id = NextCollectionId::<T, I>::get();
+			Self::deposit_event(Event::NextCollectionIdIncremented { next_id });
+
 			Ok(())
 		}
 
