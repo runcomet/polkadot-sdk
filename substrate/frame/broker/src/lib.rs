@@ -67,7 +67,7 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 	use sp_runtime::traits::{Convert, ConvertBack, MaybeConvert};
 
-	const STORAGE_VERSION: StorageVersion = StorageVersion::new(4);
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(5);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -342,8 +342,8 @@ pub mod pallet {
 			ideal_cores_sold: CoreIndex,
 			/// Number of cores which are/have been offered for sale.
 			cores_offered: CoreIndex,
-            /// Identifier for the current sale
-            sale_index: u32,
+			/// Sequential identifier for the current sale period.
+			sale_index: SaleIndex,
 		},
 		/// A new lease has been created.
 		Leased {

@@ -328,7 +328,7 @@ pub mod v4 {
 					first_core: sale_info.first_core,
 					sellout_price: sale_info.sellout_price,
 					cores_sold: sale_info.cores_sold,
-                    sale_index: 0,
+					sale_index: 0,
 				};
 				SaleInfo::<T>::put(updated_sale_info);
 			}
@@ -404,114 +404,126 @@ pub mod v4 {
 }
 
 pub mod v5 {
-    use super::*;
-    use sp_runtime::traits::{SaturatedConversion, Saturating, Zero};
-    use frame_support::traits::Get;
+	use super::*;
+	use frame_support::traits::Get;
+	use sp_runtime::traits::{SaturatedConversion, Saturating, Zero};
 
-    pub trait SaleBlock<T: Config> {
-        fn init() -> RelayBlockNumberOf<T>;
-    }
+	/// Provides the relay-chain block number at which the very first sale started. This is
+	/// needed to compute an accurate `sale_index` for the current sale during migration.
+	pub trait SaleBlock<T: Config> {
+		/// Returns the relay-chain block number at which the first-ever sale began.
+		fn init() -> RelayBlockNumberOf<T>;
+	}
 
-    pub struct MigrateToV5Impl<T, SaleBlock>(PhantomData<T>, PhantomData<SaleBlock>);
+	/// Migration that adds the `sale_index` field to `SaleInfoRecord`.
+	///
+	/// Requires the implementor to supply the relay-chain block at which the first sale started
+	/// via the `SaleBlock` trait so that the current sale index can be approximated.
+	pub struct MigrateToV5Impl<T, SaleBlock>(PhantomData<T>, PhantomData<SaleBlock>);
 
-    impl<T: Config, F: SaleBlock<T>> UncheckedOnRuntimeUpgrade for MigrateToV5Impl<T, F> {
-        #[cfg(feature = "try-runtime")]
-        fn pre_upgrade() -> Result<Vec<u8>, sp_runtime::TryRuntimeError> {
-            let sale_info_state = SaleInfo::<T>::get().map(|sale| {
-                (sale.sale_start, sale.region_begin, sale.region_end)
-            });
-            Ok(sale_info_state.encode())
-        }
+	impl<T: Config, F: SaleBlock<T>> UncheckedOnRuntimeUpgrade for MigrateToV5Impl<T, F> {
+		#[cfg(feature = "try-runtime")]
+		fn pre_upgrade() -> Result<Vec<u8>, sp_runtime::TryRuntimeError> {
+			let sale_info_state = SaleInfo::<T>::get()
+				.map(|sale| (sale.sale_start, sale.region_begin, sale.region_end));
+			Ok(sale_info_state.encode())
+		}
 
-        fn on_runtime_upgrade() -> frame_support::weights::Weight {
-            let weight = T::DbWeight::get().reads(1);
+		fn on_runtime_upgrade() -> frame_support::weights::Weight {
+			// We will read SaleInfo and, if present, also Configuration.
+			let mut weight = T::DbWeight::get().reads(1);
 
-            let current_sale = SaleInfo::<T>::get();
+			if let Some(old_sale) = SaleInfo::<T>::get() {
+				let first_sale_block = F::init();
 
-            if let Some(old_sale) = current_sale {
-                let first_sale_block = F::init();
+				let config = Configuration::<T>::get()
+					.expect("Configuration must exist if SaleInfo exists; qed");
+				// Account for the Configuration read.
+				weight.saturating_accrue(T::DbWeight::get().reads(1));
 
-                let config = Configuration::<T>::get()
-                    .expect("Configuration must exist if SaleInfo exists; qed");
+				// A full sale cycle consists of the interlude, the leadin, and the fixed-price
+				// phase. The fixed-price phase length (in relay-chain blocks) equals
+				// `region_length * timeslice_period`. Since `timeslice_period` is a runtime
+				// constant we compute it here.
+				let timeslice_period = T::TimeslicePeriod::get();
+				let region_length_in_blocks: RelayBlockNumberOf<T> =
+					Into::<RelayBlockNumberOf<T>>::into(config.region_length as u32) *
+						timeslice_period;
+				let cycle_length = config
+					.interlude_length
+					.saturating_add(config.leadin_length)
+					.saturating_add(region_length_in_blocks);
 
-                let cycle_length = config.interlude_length
-                    .saturating_add(config.leadin_length);
+				let blocks_since_first_sale = old_sale.sale_start.saturating_sub(first_sale_block);
+				let sale_index: SaleIndex = if !cycle_length.is_zero() {
+					(blocks_since_first_sale / cycle_length).saturated_into::<u32>()
+				} else {
+					0
+				};
 
-                let blocks_since_first_sale = old_sale.sale_start
-                    .saturating_sub(first_sale_block);
+				log::info!(
+					target: LOG_TARGET,
+					"Migrating SaleInfo: first_sale_block={:?}, current_sale_start={:?}, \
+					cycle_length={:?}, sale_index={}",
+					first_sale_block,
+					old_sale.sale_start,
+					cycle_length,
+					sale_index,
+				);
 
-                let sale_index = if cycle_length > Zero::zero() && blocks_since_first_sale >= cycle_length {
-                    (blocks_since_first_sale / cycle_length).saturated_into::<u32>().saturating_add(1)
-                } else if blocks_since_first_sale >= Zero::zero() {
-                    0
-                } else {
-                    log::warn!(
-                        target: LOG_TARGET,
-                        "Sale start block is before first sale block, setting sale_index to 0",
-                    );
-                    0
-                };
+				let updated_sale = SaleInfoRecord {
+					sale_start: old_sale.sale_start,
+					leadin_length: old_sale.leadin_length,
+					end_price: old_sale.end_price,
+					region_begin: old_sale.region_begin,
+					region_end: old_sale.region_end,
+					ideal_cores_sold: old_sale.ideal_cores_sold,
+					cores_offered: old_sale.cores_offered,
+					first_core: old_sale.first_core,
+					sellout_price: old_sale.sellout_price,
+					cores_sold: old_sale.cores_sold,
+					sale_index,
+				};
+				SaleInfo::<T>::put(updated_sale);
+				weight.saturating_accrue(T::DbWeight::get().writes(1));
 
-                log::info!(
-                    target: LOG_TARGET,
-                    "Migrating SaleInfo: first_sale_block={:?}, current_sale_start={:?}, cycle_length={:?}, sale_index={}",
-                    first_sale_block,
-                    old_sale.sale_start,
-                    cycle_length,
-                    sale_index,
-                );
+				log::info!(
+					target: LOG_TARGET,
+					"Storage migration v5 for pallet-broker completed: added sale_index = {}",
+					sale_index,
+				);
+			} else {
+				log::info!(
+					target: LOG_TARGET,
+					"No SaleInfo found, skipping v5 migration",
+				);
+			}
 
-                let updated_sale = SaleInfoRecord {
-                    sale_start: old_sale.sale_start,
-                    leadin_length: old_sale.leadin_length,
-                    end_price: old_sale.end_price,
-                    region_begin: old_sale.region_begin,
-                    region_end: old_sale.region_end,
-                    ideal_cores_sold: old_sale.ideal_cores_sold,
-                    cores_offered: old_sale.cores_offered,
-                    first_core: old_sale.first_core,
-                    sellout_price: old_sale.sellout_price,
-                    cores_sold: old_sale.cores_sold,
-                    sale_index,
-                };
-                SaleInfo::<T>::put(updated_sale);
+			weight
+		}
 
-                log::info!(
-                    target: LOG_TARGET,
-                    "Storage migration v5 for pallet-broker completed: added sale_index = {}",
-                    sale_index,
-                );
-            } else {
-                log::info!(
-                    target: LOG_TARGET,
-                    "No SaleInfo found, skipping v5 migration",
-                );
-            }
-            weight.saturating_add(T::DbWeight::get().writes(2))
-        }
+		#[cfg(feature = "try-runtime")]
+		fn post_upgrade(state: Vec<u8>) -> Result<(), sp_runtime::TryRuntimeError> {
+			let old_state: Option<(RelayBlockNumberOf<T>, Timeslice, Timeslice)> =
+				Decode::decode(&mut &state[..]).expect("pre_upgrade provides a valid state; qed");
 
-        #[cfg(feature = "try-runtime")]
-        fn post_upgrade(state: Vec<u8>) -> Result<(), sp_runtime::TryRuntimeError> {
-            let old_state: Option<(RelayBlockNumberOf<T>, Timeslice, Timeslice)> =
-                Decode::decode(&mut &state[..]).expect("pre_upgrade provides a valid state; qed");
+			let new_sale = SaleInfo::<T>::get();
+			ensure!(new_sale.is_some(), "SaleInfo should still exist after migration");
 
-            let new_sale = SaleInfo::<T>::get();
-            ensure!(new_sale.is_some(), "SaleInfo should still exist after migration");
+			if let (Some(old_state), Some(new_sale)) = (old_state, new_sale) {
+				let (old_sale_start, old_region_begin, old_region_end) = old_state;
 
-            if let (Some(old_state), Some(new_sale)) = (old_state, new_sale) {
-                let (old_sale_start, old_region_begin, old_region_end) = old_state;
+				ensure!(
+					old_sale_start == new_sale.sale_start &&
+						old_region_begin == new_sale.region_begin &&
+						old_region_end == new_sale.region_end,
+					"Core SaleInfo fields should not have changed during migration"
+				);
+			}
 
-                ensure!(
-                    old_sale_start == new_sale.sale_start &&
-                    old_region_begin == new_sale.region_begin &&
-                    old_region_end == new_sale.region_end,
-                    "Core SaleInfo fields should not have changed during migration"
-                );
-            }
-
-            Ok(())
-        }
-    }
+			Ok(())
+		}
+	}
 }
 
 /// Migrate the pallet storage from `0` to `1`.
@@ -548,9 +560,9 @@ pub type MigrateV3ToV4<T, BlockConversion> = frame_support::migrations::Versione
 >;
 
 pub type MigrateV4ToV5<T, SaleBlock> = frame_support::migrations::VersionedMigration<
-    4,
-    5,
-    v5::MigrateToV5Impl<T, SaleBlock>,
-    Pallet<T>,
-    <T as frame_system::Config>::DbWeight,
+	4,
+	5,
+	v5::MigrateToV5Impl<T, SaleBlock>,
+	Pallet<T>,
+	<T as frame_system::Config>::DbWeight,
 >;
