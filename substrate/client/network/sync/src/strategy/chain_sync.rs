@@ -985,6 +985,7 @@ where
 	fn actions(
 		&mut self,
 		network_service: &NetworkServiceHandle,
+		backpressure: bool,
 	) -> Result<Vec<SyncingAction<B>>, ClientError> {
 		if !self.peers.is_empty() && self.queue_blocks.is_empty() {
 			if let Some((hash, number, skip_proofs)) = self.pending_state_sync_attempt.take() {
@@ -992,12 +993,17 @@ where
 			}
 		}
 
-		let block_requests = self
-			.block_requests()
-			.into_iter()
-			.map(|(peer_id, request)| self.create_block_request_action(peer_id, request))
-			.collect::<Vec<_>>();
-		self.actions.extend(block_requests);
+		// Skip block requests when the import queue is under pressure to avoid marking peers as
+		// `DownloadingNew` without issuing an actual network request (which would leave them stuck
+		// until a disconnect/timeout recovers them).
+		if !backpressure {
+			let block_requests = self
+				.block_requests()
+				.into_iter()
+				.map(|(peer_id, request)| self.create_block_request_action(peer_id, request))
+				.collect::<Vec<_>>();
+			self.actions.extend(block_requests);
+		}
 
 		let justification_requests = self
 			.justification_requests()

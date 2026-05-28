@@ -108,6 +108,7 @@ struct Metrics {
 	peers: Gauge<U64>,
 	import_queue_blocks_submitted: Counter<U64>,
 	import_queue_justifications_submitted: Counter<U64>,
+	import_queue_pending_blocks: Gauge<U64>,
 }
 
 impl Metrics {
@@ -131,6 +132,13 @@ impl Metrics {
 					"Number of justifications submitted to the import queue.",
 				)?;
 				register(c, r)?
+			},
+			import_queue_pending_blocks: {
+				let g = Gauge::new(
+					"substrate_sync_import_queue_pending_blocks",
+					"Number of blocks currently waiting in the import queue channel.",
+				)?;
+				register(g, r)?
 			},
 		})
 	}
@@ -577,7 +585,24 @@ where
 	}
 
 	fn process_strategy_actions(&mut self) -> Result<(), ClientError> {
-		for action in self.strategy.actions(&self.network_service)? {
+		let queue_info = self.import_queue.queue_info();
+		if let Some(metrics) = &self.metrics {
+			metrics.import_queue_pending_blocks.set(queue_info.queued_blocks as u64);
+		}
+		let under_pressure = queue_info.is_under_pressure();
+		if under_pressure {
+			trace!(
+				target: LOG_TARGET,
+				"Import queue is under pressure ({} blocks queued), pausing block requests.",
+				queue_info.queued_blocks,
+			);
+		}
+
+		// Pass backpressure to strategy.actions() so ChainSync can skip block_requests()
+		// entirely when the queue is saturated, avoiding the stuck-peer problem that would arise
+		// from marking peers `DownloadingNew` without issuing a matching network request.
+		// DropPeer, CancelRequest, ImportBlocks, and ImportJustifications are always processed.
+		for action in self.strategy.actions(&self.network_service, under_pressure)? {
 			match action {
 				SyncingAction::StartRequest { peer_id, key, request, remove_obsolete } => {
 					if !self.peers.contains_key(&peer_id) {

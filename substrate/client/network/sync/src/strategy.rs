@@ -130,12 +130,17 @@ where
 	/// Get an estimate of the number of parallel sync requests.
 	fn num_sync_requests(&self) -> usize;
 
-	/// Get actions that should be performed by the owner on the strategy's behalf
+	/// Get actions that should be performed by the owner on the strategy's behalf.
+	///
+	/// When `backpressure` is `true` the import queue is saturated; strategies must not issue
+	/// new block-download requests in that case (justification, warp, and state requests are
+	/// unaffected).
 	#[must_use]
 	fn actions(
 		&mut self,
 		// TODO: Consider making this internal property of the strategy
 		network_service: &NetworkServiceHandle,
+		backpressure: bool,
 	) -> Result<Vec<SyncingAction<B>>, ClientError>;
 }
 

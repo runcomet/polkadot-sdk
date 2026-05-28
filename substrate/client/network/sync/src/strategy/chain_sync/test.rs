@@ -197,7 +197,7 @@ fn restart_doesnt_affect_peers_downloading_finality_data() {
 
 	// we wil send block requests to these peers
 	// for these blocks we don't know about
-	let actions = sync.actions(&network_handle).unwrap();
+	let actions = sync.actions(&network_handle, false).unwrap();
 	assert_eq!(actions.len(), 2);
 	assert!(actions.iter().all(|action| match action {
 		SyncingAction::StartRequest { peer_id, .. } => peer_id == &peer_id1 || peer_id == &peer_id2,
@@ -230,7 +230,7 @@ fn restart_doesnt_affect_peers_downloading_finality_data() {
 	sync.restart();
 
 	// which should make us cancel and send out again block requests to the first two peers
-	let actions = sync.actions(&network_handle).unwrap();
+	let actions = sync.actions(&network_handle, false).unwrap();
 	assert_eq!(actions.len(), 4);
 	let mut cancelled_first = HashSet::new();
 	assert!(actions.iter().all(|action| match action {

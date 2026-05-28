@@ -1,0 +1,34 @@
+title: 'sync: Add backpressure to import queue'
+doc:
+- audience: Node Dev
+  description: |-
+    The channel between `BasicQueueHandle` and the background `BlockImportWorker` was
+    previously unbounded. Under heavy load, if the node cannot import blocks fast enough,
+    this channel could grow without limit, consuming unbounded memory.
+
+    This PR adds backpressure by:
+
+    - Introducing `ImportQueueInfo` (with `queued_blocks` / `max_queued_blocks` fields and
+      an `is_under_pressure()` helper) and a `queue_info()` method on the
+      `ImportQueueService` trait.
+    - Tracking the number of blocks waiting in the import channel via a shared
+      `Arc<AtomicUsize>` counter: incremented when `import_blocks` enqueues a batch,
+      decremented when the worker dequeues it.
+    - In `SyncingEngine::process_strategy_actions`, gating only `StartRequest` and
+      `ImportBlocks` actions when the queue is under pressure. `DropPeer`, `CancelRequest`,
+      and `ImportJustifications` are always processed so that misbehaving peers are still
+      dropped and stale requests are still cancelled even while the import pipeline is
+      saturated.
+
+    The backpressure threshold is 1 024 queued blocks (`MAX_QUEUED_BLOCKS`). Once the
+    import worker drains the queue below that limit, normal request scheduling resumes.
+
+    A new Prometheus gauge `substrate_sync_import_queue_pending_blocks` is added to make
+    queue depth visible in production dashboards.
+
+    Closes #9607.
+crates:
+- name: sc-consensus
+  bump: minor
+- name: sc-network-sync
+  bump: patch
