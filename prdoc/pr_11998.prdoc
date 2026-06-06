@@ -10,25 +10,28 @@ doc:
 
     - Introducing `ImportQueueInfo` (with `queued_blocks` / `max_queued_blocks` fields and
       an `is_under_pressure()` helper) and a `queue_info()` method on the
-      `ImportQueueService` trait.
-    - Tracking the number of blocks waiting in the import channel via a shared
+      `ImportQueueService` trait. The method has a default implementation that reports the
+      queue as never under pressure, so existing implementors are unaffected.
+    - Tracking the number of blocks waiting in the worker channel via a shared
       `Arc<AtomicUsize>` counter: incremented when `import_blocks` enqueues a batch,
-      decremented when the worker dequeues it.
-    - In `SyncingEngine::process_strategy_actions`, gating only `StartRequest` and
-      `ImportBlocks` actions when the queue is under pressure. `DropPeer`, `CancelRequest`,
-      and `ImportJustifications` are always processed so that misbehaving peers are still
-      dropped and stale requests are still cancelled even while the import pipeline is
-      saturated.
+      decremented when the worker picks the batch up.
+    - Passing a `backpressure` flag to `SyncingStrategy::actions`. When set, `ChainSync`
+      skips issuing new block-download requests. Justification, warp, and state requests
+      are unaffected, and the actions a strategy returns (dropping peers, cancelling stale
+      requests, importing already-downloaded blocks and justifications) are always
+      processed, so a saturated import pipeline does not stall peer management.
 
-    The backpressure threshold is 1 024 queued blocks (`MAX_QUEUED_BLOCKS`). Once the
-    import worker drains the queue below that limit, normal request scheduling resumes.
+    The threshold is 1024 queued blocks (`MAX_QUEUED_BLOCKS`); once the worker drains the
+    channel below it, normal request scheduling resumes. This bounds the worker channel
+    specifically, which is a separate concern from `ChainSync`'s existing
+    `MAX_IMPORTING_BLOCKS` limit (that one covers the whole submit-to-imported round trip).
 
-    A new Prometheus gauge `substrate_sync_import_queue_pending_blocks` is added to make
-    queue depth visible in production dashboards.
+    A new Prometheus gauge `substrate_sync_import_queue_pending_blocks` exposes the channel
+    depth for dashboards.
 
     Closes #9607.
 crates:
 - name: sc-consensus
   bump: minor
 - name: sc-network-sync
-  bump: patch
+  bump: major

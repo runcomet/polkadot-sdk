@@ -598,10 +598,10 @@ where
 			);
 		}
 
-		// Pass backpressure to strategy.actions() so ChainSync can skip block_requests()
-		// entirely when the queue is saturated, avoiding the stuck-peer problem that would arise
-		// from marking peers `DownloadingNew` without issuing a matching network request.
-		// DropPeer, CancelRequest, ImportBlocks, and ImportJustifications are always processed.
+		// Tell the strategy to hold off on new block requests while the queue is saturated. We
+		// still process every action it returns regardless: peers must still be dropped, stale
+		// requests cancelled, and already-downloaded blocks and justifications imported while the
+		// pipeline catches up.
 		for action in self.strategy.actions(&self.network_service, under_pressure)? {
 			match action {
 				SyncingAction::StartRequest { peer_id, key, request, remove_obsolete } => {

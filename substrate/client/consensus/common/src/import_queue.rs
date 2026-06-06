@@ -103,19 +103,20 @@ pub trait Verifier<B: BlockT>: Send + Sync {
 	async fn verify(&self, block: BlockImportParams<B>) -> Result<BlockImportParams<B>, String>;
 }
 
+/// A snapshot of the import queue's occupancy, used to apply backpressure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImportQueueInfo {
-    /// Number of blocks currently waiting to be imported.
-    pub queued_blocks: usize,
-    /// Maximum number of blocks before the queue is considered under pressure.
-    pub max_queued_blocks: usize,
+	/// Number of blocks currently waiting to be imported.
+	pub queued_blocks: usize,
+	/// Number of waiting blocks at which the queue is considered saturated.
+	pub max_queued_blocks: usize,
 }
 
 impl ImportQueueInfo {
-    /// Returns true if the queue has reached the pressure threshold.
-    pub fn is_under_pressure(&self) -> bool {
-        self.queued_blocks >= self.max_queued_blocks
-    }
+	/// Whether the queue has reached the point where callers should stop feeding it blocks.
+	pub fn is_under_pressure(&self) -> bool {
+		self.queued_blocks >= self.max_queued_blocks
+	}
 }
 
 /// Blocks import queue API.
@@ -135,8 +136,13 @@ pub trait ImportQueueService<B: BlockT>: Send {
 		justifications: Justifications,
 	);
 
-    /// Returns information about the current import queue state.
-    fn queue_info(&self) -> ImportQueueInfo;
+	/// Report how full the import queue currently is so callers can apply backpressure.
+	///
+	/// The default reports an empty queue with no limit, i.e. never under pressure.
+	/// Implementations that can accumulate a backlog should override this.
+	fn queue_info(&self) -> ImportQueueInfo {
+		ImportQueueInfo { queued_blocks: 0, max_queued_blocks: usize::MAX }
+	}
 }
 
 #[async_trait::async_trait]

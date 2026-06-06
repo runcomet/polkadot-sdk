@@ -46,7 +46,12 @@ use crate::{
 	metrics::Metrics,
 };
 
-/// Maximum number of blocks that may sit in the import queue before backpressure is signalled.
+/// Number of blocks allowed to sit in the worker channel before we signal backpressure.
+///
+/// This bounds the channel between [`BasicQueueHandle`] and the background worker, which was
+/// the unbounded growth point. It is a separate, tighter limit than `chain_sync`'s
+/// `MAX_IMPORTING_BLOCKS`: that one counts blocks for the whole submit-to-imported round trip,
+/// whereas this only counts blocks queued but not yet picked up by the worker.
 const MAX_QUEUED_BLOCKS: usize = 1_024;
 
 /// Interface to a basic block import queue that is importing blocks sequentially in a separate
@@ -267,8 +272,8 @@ async fn block_import_process<B: BlockT>(
 			},
 		};
 
-		// Blocks have left the queue; decrement before importing so the counter
-		// accurately reflects how many are still waiting in the channel.
+		// These blocks are leaving the channel, so drop them from the pending count before we
+		// start importing. What's left in the count is what's still waiting to be picked up.
 		queued_blocks.fetch_sub(blocks.len(), Ordering::Relaxed);
 
 		let res =
@@ -628,12 +633,9 @@ mod tests {
 		}
 	}
 
-	/// Verify two properties of the backpressure counter:
-	///
-	/// 1. It tracks the channel depth accurately — after submitting N blocks to a worker
-	///    whose verifier never completes, `queued_blocks` equals exactly N.
-	/// 2. `is_under_pressure()` returns true once the threshold is reached, which is the
-	///    signal `SyncingEngine` uses to stop issuing new block requests.
+	// Feed more blocks than the threshold to a worker whose verifier never returns, so nothing
+	// ever leaves the channel, and check that the pending count tracks the backlog and reports
+	// the queue as under pressure. That report is what `SyncingEngine` uses to pause requests.
 	#[test]
 	fn backpressure_counter_tracks_channel_depth_and_signals_pressure() {
 		struct HangingVerifier;
@@ -644,8 +646,8 @@ mod tests {
 				&self,
 				_block: BlockImportParams<Block>,
 			) -> Result<BlockImportParams<Block>, String> {
-				// Never resolves — the worker is permanently stalled, so no block is ever
-				// dequeued and the counter stays exactly equal to what was submitted.
+				// Block forever, so the worker never finishes a batch and the pending count
+				// stays where we left it.
 				futures::future::pending::<()>().await;
 				unreachable!()
 			}
@@ -681,14 +683,14 @@ mod tests {
 			);
 		}
 
-		// The verifier never completes, so at most one batch can be dequeued (and its
-		// decrement applied) before we read the counter. The counter is guaranteed to be
-		// >= MAX_QUEUED_BLOCKS regardless of that race.
+		// The worker might pull a single batch off the channel before we read the count, so
+		// allow for that one batch and only assert we are at or above the threshold.
 		let info = handle.queue_info();
 		assert!(
 			info.queued_blocks >= MAX_QUEUED_BLOCKS,
 			"counter ({}) should be >= MAX_QUEUED_BLOCKS ({})",
-			info.queued_blocks, MAX_QUEUED_BLOCKS,
+			info.queued_blocks,
+			MAX_QUEUED_BLOCKS,
 		);
 
 		assert!(
@@ -702,8 +704,14 @@ mod tests {
 	fn prioritizes_finality_work_over_block_import() {
 		let (result_sender, mut result_port) = buffered_link::buffered_link(100_000);
 
-		let (worker, finality_sender, block_import_sender) =
-			BlockImportWorker::new(result_sender, (), Box::new(()), Some(Box::new(())), None, Arc::new(AtomicUsize::new(0)));
+		let (worker, finality_sender, block_import_sender) = BlockImportWorker::new(
+			result_sender,
+			(),
+			Box::new(()),
+			Some(Box::new(())),
+			None,
+			Arc::new(AtomicUsize::new(0)),
+		);
 		futures::pin_mut!(worker);
 
 		let import_block = |n| {
