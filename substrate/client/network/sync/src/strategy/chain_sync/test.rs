@@ -302,13 +302,10 @@ fn backpressure_withholds_block_requests_and_leaves_peers_available() {
 
 #[test]
 fn backpressure_does_not_withhold_ancestor_search_requests() {
-	// Ancestor-search requests only probe a single header to find the common block and add
-	// nothing to the import queue, so they must keep being issued even while the queue is under
-	// pressure. Otherwise fork detection would stall and the node could never work out which
-	// blocks to download once the queue drains.
+	// Ancestor search isn't an import-feeding request, so it's still issued under pressure.
 	let client = Arc::new(TestClientBuilder::new().build());
 
-	// Move our chain past genesis *before* constructing `ChainSync`, so that `reset_sync_start_point`
+	// Move our chain past genesis before constructing `ChainSync`, so that `reset_sync_start_point`
 	// picks up a non-zero best block. A peer on an unknown fork then triggers an ancestor search
 	// rather than `add_peer` short-circuiting to "just start downloading" at genesis.
 	let new_blocks = |n| {
