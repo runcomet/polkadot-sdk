@@ -441,18 +441,14 @@ pub mod v5 {
 				// Account for the Configuration read.
 				weight.saturating_accrue(T::DbWeight::get().reads(1));
 
-				// A full sale cycle consists of the interlude, the leadin, and the fixed-price
-				// phase. The fixed-price phase length (in relay-chain blocks) equals
-				// `region_length * timeslice_period`. Since `timeslice_period` is a runtime
-				// constant we compute it here.
+				// Consecutive sales start exactly one region apart (`rotate_sale` advances
+				// `region_begin` by `region_length` timeslices each cycle), so the relay-chain
+				// length of a full sale cycle is `region_length * timeslice_period`. The interlude
+				// and leadin are phases inside that window, not time added on top of it.
 				let timeslice_period = T::TimeslicePeriod::get();
-				let region_length_in_blocks: RelayBlockNumberOf<T> =
-					Into::<RelayBlockNumberOf<T>>::into(config.region_length as u32) *
-						timeslice_period;
-				let cycle_length = config
-					.interlude_length
-					.saturating_add(config.leadin_length)
-					.saturating_add(region_length_in_blocks);
+				let cycle_length: RelayBlockNumberOf<T> =
+					Into::<RelayBlockNumberOf<T>>::into(config.region_length as u32)
+						.saturating_mul(timeslice_period);
 
 				let blocks_since_first_sale = old_sale.sale_start.saturating_sub(first_sale_block);
 				let sale_index: SaleIndex = if !cycle_length.is_zero() {

@@ -19,4 +19,4 @@ doc:
 
 crates:
   - name: pallet-broker
-    bump: minor
+    bump: major
