@@ -996,6 +996,12 @@ where
 		// Skip block requests when the import queue is under pressure to avoid marking peers as
 		// `DownloadingNew` without issuing an actual network request (which would leave them stuck
 		// until a disconnect/timeout recovers them).
+		//
+		// This only gates `block_requests()`, i.e. the requests that feed the import queue.
+		// Ancestor-search requests (queued from `add_peer`, block-announce handling, ancestry
+		// continuation in `on_block_data`, and `restart`) intentionally bypass backpressure: they
+		// only probe a single header to find the common block, add nothing to the import queue,
+		// and must keep progressing so fork detection does not stall while the queue drains.
 		if !backpressure {
 			let block_requests = self
 				.block_requests()

@@ -132,9 +132,16 @@ where
 
 	/// Get actions that should be performed by the owner on the strategy's behalf.
 	///
-	/// When `backpressure` is `true` the import queue is saturated; strategies must not issue
-	/// new block-download requests in that case (justification, warp, and state requests are
-	/// unaffected).
+	/// When `backpressure` is `true` the import queue is saturated. In that case strategies must
+	/// not issue new block-download requests that feed the import queue, i.e. the requests that
+	/// put a peer into a downloading state and produce blocks to be imported.
+	///
+	/// Every other action is unaffected and must still be emitted, including peer drops, request
+	/// cancellations, justification, warp and state requests, and ancestor-search (ancestry)
+	/// requests. Ancestor search only probes a single header to locate the common block and
+	/// enqueues nothing for import, so it must keep making progress even under pressure;
+	/// otherwise fork detection would stall and the node could not work out which blocks to
+	/// download once the queue drains.
 	#[must_use]
 	fn actions(
 		&mut self,
