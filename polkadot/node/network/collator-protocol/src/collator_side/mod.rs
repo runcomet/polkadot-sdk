@@ -16,6 +16,7 @@
 
 use std::{
 	collections::{hash_map::Entry, HashMap, HashSet},
+	sync::Arc,
 	time::Duration,
 };
 
@@ -47,7 +48,6 @@ use polkadot_node_subsystem::{
 use polkadot_node_subsystem_util::{
 	backing_implicit_view::View as ImplicitView,
 	reputation::{ReputationAggregator, REPUTATION_CHANGE_INTERVAL},
-	request_node_features,
 	runtime::{
 		fetch_claim_queue, get_candidate_events, get_group_rotation_info, ClaimQueueSnapshot,
 		RuntimeInfo,
@@ -55,12 +55,13 @@ use polkadot_node_subsystem_util::{
 	TimeoutExt,
 };
 use polkadot_primitives::{
-	node_features, AuthorityDiscoveryId, BlockNumber, CandidateEvent, CandidateHash,
+	AuthorityDiscoveryId, BlockNumber, CandidateEvent, CandidateHash,
 	CandidateReceiptV2 as CandidateReceipt, CollatorPair, CoreIndex, Hash, HeadData, Id as ParaId,
 	SessionIndex,
 };
 
 use crate::{modify_reputation, LOG_TARGET, LOG_TARGET_STATS};
+use polkadot_node_clock::{BoxedDelay, Clock};
 
 mod collation;
 mod error;
@@ -113,7 +114,7 @@ const MAX_PARALLEL_CHAIN_API_REQUESTS: usize = 10;
 ///
 /// `Pending` variant never finishes and should be used when there're no peers
 /// connected.
-type ReconnectTimeout = Fuse<futures_timer::Delay>;
+type ReconnectTimeout = Fuse<BoxedDelay>;
 
 /// A future that returns a candidate hash along with validator discovery
 /// keys once a timeout hit.
@@ -122,15 +123,20 @@ type ReconnectTimeout = Fuse<futures_timer::Delay>;
 /// we should reset its interest in this advertisement in a buffer. For example,
 /// when the PoV was already requested from another peer.
 struct ResetInterestTimeout {
-	fut: futures_timer::Delay,
+	fut: BoxedDelay,
 	candidate_hash: CandidateHash,
 	peer_id: PeerId,
 }
 
 impl ResetInterestTimeout {
 	/// Returns new `ResetInterestTimeout` that resolves after given timeout.
-	fn new(candidate_hash: CandidateHash, peer_id: PeerId, delay: Duration) -> Self {
-		Self { fut: futures_timer::Delay::new(delay), candidate_hash, peer_id }
+	fn new(
+		clock: &dyn Clock,
+		candidate_hash: CandidateHash,
+		peer_id: PeerId,
+		delay: Duration,
+	) -> Self {
+		Self { fut: clock.delay(delay), candidate_hash, peer_id }
 	}
 }
 
@@ -141,7 +147,7 @@ impl std::future::Future for ResetInterestTimeout {
 		mut self: std::pin::Pin<&mut Self>,
 		cx: &mut std::task::Context<'_>,
 	) -> std::task::Poll<Self::Output> {
-		self.fut.poll_unpin(cx).map(|_| (self.candidate_hash, self.peer_id))
+		self.fut.as_mut().poll(cx).map(|_| (self.candidate_hash, self.peer_id))
 	}
 }
 
@@ -295,8 +301,6 @@ struct PerSchedulingParent {
 	block_number: Option<BlockNumber>,
 	/// The session index of this relay parent.
 	session_index: SessionIndex,
-	/// Whether v3 candidate receipts are enabled.
-	v3_enabled: bool,
 }
 
 impl PerSchedulingParent {
@@ -329,27 +333,21 @@ impl PerSchedulingParent {
 			validator_groups.insert(*core, group);
 		}
 
-		let node_features = request_node_features(block_hash, session_index, ctx.sender())
-			.await
-			.await
-			.ok()
-			.and_then(|r| r.ok())
-			.unwrap_or_default();
-
-		let v3_enabled = node_features::FeatureIndex::CandidateReceiptV3.is_set(&node_features);
-
 		Ok(Self {
 			validator_group: validator_groups,
 			collations: HashMap::new(),
 			assignments,
 			block_number,
 			session_index,
-			v3_enabled,
 		})
 	}
 }
 
 struct State {
+	/// Clock used for all time reads. Production passes [`polkadot_node_clock::SystemClock`];
+	/// tests inject a mock.
+	clock: Arc<dyn Clock>,
+
 	/// Our network peer id.
 	local_peer_id: PeerId,
 
@@ -424,8 +422,10 @@ impl State {
 		collator_pair: CollatorPair,
 		metrics: Metrics,
 		reputation: ReputationAggregator,
+		clock: Arc<dyn Clock>,
 	) -> State {
 		State {
+			clock,
 			local_peer_id,
 			collator_pair,
 			metrics,
@@ -480,26 +480,8 @@ async fn distribute_collation<Context>(
 	)
 	.await;
 
-	// Step 1: Extract execution relay_parent to lookup node features and get v3_enabled
-	let relay_parent = receipt.descriptor.relay_parent();
-	let v3_enabled = match state.per_scheduling_parent.get(&relay_parent) {
-		Some(sp_state) => sp_state.v3_enabled,
-		None => {
-			gum::warn!(
-				target: LOG_TARGET,
-				para_id = %id,
-				?relay_parent,
-				?candidate_hash,
-				"Dropping candidate: candidate relay parent is out of our view",
-			);
-			return Ok(());
-		},
-	};
+	let scheduling_parent = receipt.descriptor.scheduling_parent();
 
-	// Step 2: Extract scheduling_parent using v3_enabled
-	let scheduling_parent = receipt.descriptor.scheduling_parent(v3_enabled);
-
-	// Step 3: Lookup the ACTUAL per_relay_parent state using scheduling_parent
 	let per_scheduling_parent = match state.per_scheduling_parent.get_mut(&scheduling_parent) {
 		Some(per_scheduling_parent) => per_scheduling_parent,
 		None => {
@@ -617,6 +599,7 @@ async fn distribute_collation<Context>(
 			session_index: per_scheduling_parent.session_index,
 			stats: per_scheduling_parent.block_number.map(|n| {
 				CollationStats::new(
+					&*state.clock,
 					para_head,
 					n,
 					scheduling_parent,
@@ -647,12 +630,6 @@ async fn distribute_collation<Context>(
 		})
 		.map(|(id, _)| id);
 
-	// Make sure already connected peers get collations:
-	let is_active_leaf = state
-		.implicit_view
-		.as_ref()
-		.map_or(false, |iv| iv.leaves().any(|l| *l == scheduling_parent));
-
 	for peer_id in interested {
 		// Get the peer's protocol version. The peer should exist in peer_data
 		// since we iterated over it to build `interested`.
@@ -661,6 +638,7 @@ async fn distribute_collation<Context>(
 
 		advertise_collation(
 			ctx,
+			&*state.clock,
 			scheduling_parent,
 			per_scheduling_parent,
 			peer_id,
@@ -668,7 +646,6 @@ async fn distribute_collation<Context>(
 			&state.peer_ids,
 			&mut state.advertisement_timeouts,
 			&state.metrics,
-			is_active_leaf,
 		)
 		.await;
 	}
@@ -905,6 +882,7 @@ async fn update_validator_connections<Context>(
 #[overseer::contextbounds(CollatorProtocol, prefix = self::overseer)]
 async fn advertise_collation<Context>(
 	ctx: &mut Context,
+	clock: &dyn Clock,
 	scheduling_parent: Hash,
 	per_scheduling_parent: &mut PerSchedulingParent,
 	peer: &PeerId,
@@ -912,21 +890,7 @@ async fn advertise_collation<Context>(
 	peer_ids: &HashMap<PeerId, HashSet<AuthorityDiscoveryId>>,
 	advertisement_timeouts: &mut FuturesUnordered<ResetInterestTimeout>,
 	metrics: &Metrics,
-	is_active_leaf: bool,
 ) {
-	// Skip advertising to V3 peers if the scheduling parent is not an active
-	// leaf and v3 is enabled — V3 validators will reject (and penalize) such
-	// advertisements.
-	if peer_version == CollationVersion::V3 && per_scheduling_parent.v3_enabled && !is_active_leaf {
-		gum::debug!(
-			target: LOG_TARGET,
-			?scheduling_parent,
-			peer_id = %peer,
-			"Skipping V3 advertisement: scheduling parent is not an active leaf",
-		);
-		return;
-	}
-
 	for (candidate_hash, collation_and_core) in per_scheduling_parent.collations.iter_mut() {
 		let core_index = *collation_and_core.core_index();
 		let collation = collation_and_core.collation_mut();
@@ -959,8 +923,7 @@ async fn advertise_collation<Context>(
 		}
 
 		// Get the candidate descriptor version from the receipt
-		let candidate_descriptor_version =
-			collation.receipt.descriptor.version(per_scheduling_parent.v3_enabled);
+		let candidate_descriptor_version = collation.receipt.descriptor.version();
 
 		gum::debug!(
 			target: LOG_TARGET,
@@ -982,6 +945,7 @@ async fn advertise_collation<Context>(
 						candidate_hash: *candidate_hash,
 						parent_head_data_hash: collation.parent_head_data.hash(),
 						candidate_descriptor_version,
+						relay_parent: collation.receipt.descriptor.relay_parent(),
 					},
 				))
 			},
@@ -1003,6 +967,7 @@ async fn advertise_collation<Context>(
 		validator_group.advertised_to_peer(candidate_hash, &peer_ids, peer);
 
 		advertisement_timeouts.push(ResetInterestTimeout::new(
+			clock,
 			*candidate_hash,
 			*peer,
 			RESET_INTEREST_TIMEOUT,
@@ -1425,12 +1390,7 @@ async fn advertise_collations_for_scheduling_parents<Context>(
 		None => return unknown_scheduling_parents,
 	};
 
-	let active_leaves: HashSet<Hash> = state
-		.implicit_view
-		.as_ref()
-		.map(|iv| iv.leaves().copied().collect())
-		.unwrap_or_default();
-
+	let clock = state.clock.clone();
 	for scheduling_parent in scheduling_parents {
 		let block_hashes = match state.per_scheduling_parent.contains_key(&scheduling_parent) {
 			true => state
@@ -1450,6 +1410,7 @@ async fn advertise_collations_for_scheduling_parents<Context>(
 			if let Some(per_scheduling_parent) = state.per_scheduling_parent.get_mut(block_hash) {
 				advertise_collation(
 					ctx,
+					&*clock,
 					*block_hash,
 					per_scheduling_parent,
 					peer_id,
@@ -1457,7 +1418,6 @@ async fn advertise_collations_for_scheduling_parents<Context>(
 					&state.peer_ids,
 					&mut state.advertisement_timeouts,
 					&state.metrics,
-					active_leaves.contains(block_hash),
 				)
 				.await;
 			}
@@ -1808,9 +1768,9 @@ async fn handle_our_view_change<Context>(
 					continue;
 				};
 
-				let is_active_leaf = implicit_view.leaves().any(|l| l == block_hash);
 				advertise_collation(
 					ctx,
+					&*state.clock,
 					*block_hash,
 					per_relay_parent,
 					peer_id,
@@ -1818,7 +1778,6 @@ async fn handle_our_view_change<Context>(
 					&state.peer_ids,
 					&mut state.advertisement_timeouts,
 					&state.metrics,
-					is_active_leaf,
 				)
 				.await;
 			}
@@ -2049,6 +2008,7 @@ pub(crate) async fn run<Context>(
 	collator_pair: CollatorPair,
 	req_v2_receiver: IncomingRequestReceiver<request_v2::CollationFetchingRequest>,
 	metrics: Metrics,
+	clock: Arc<dyn Clock>,
 ) -> std::result::Result<(), FatalError> {
 	run_inner(
 		ctx,
@@ -2058,6 +2018,7 @@ pub(crate) async fn run<Context>(
 		metrics,
 		ReputationAggregator::default(),
 		REPUTATION_CHANGE_INTERVAL,
+		clock,
 	)
 	.await
 }
@@ -2071,13 +2032,15 @@ async fn run_inner<Context>(
 	metrics: Metrics,
 	reputation: ReputationAggregator,
 	reputation_interval: Duration,
+	clock: Arc<dyn Clock>,
 ) -> std::result::Result<(), FatalError> {
 	use OverseerSignal::*;
 
-	let new_reputation_delay = || futures_timer::Delay::new(reputation_interval).fuse();
+	let new_reputation_delay = || clock.delay(reputation_interval).fuse();
 	let mut reputation_delay = new_reputation_delay();
 
-	let mut state = State::new(local_peer_id, collator_pair, metrics.clone(), reputation);
+	let mut state =
+		State::new(local_peer_id, collator_pair, metrics.clone(), reputation, clock.clone());
 	let mut runtime = RuntimeInfo::new(None);
 
 	loop {
@@ -2100,7 +2063,7 @@ async fn run_inner<Context>(
 				},
 				FromOrchestra::Signal(ActiveLeaves(update)) => {
 					if update.activated.is_some() {
-						*reconnect_timeout = futures_timer::Delay::new(RECONNECT_AFTER_LEAF_TIMEOUT).fuse();
+						*reconnect_timeout = clock.delay(RECONNECT_AFTER_LEAF_TIMEOUT).fuse();
 					}
 				}
 				FromOrchestra::Signal(BlockFinalized(hash, number)) => {
@@ -2136,7 +2099,7 @@ async fn run_inner<Context>(
 
 								if let Some(mut stats) = maybe_stats {
 									// Update the timestamp when collation has been sent (from subsystem perspective)
-									stats.set_fetched_at(std::time::Instant::now());
+									stats.set_fetched_at(clock.now());
 									gum::debug!(
 										target: LOG_TARGET_STATS,
 										para_head = ?stats.head(),
