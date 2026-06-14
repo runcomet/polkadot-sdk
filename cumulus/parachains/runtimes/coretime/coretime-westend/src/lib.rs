@@ -136,7 +136,7 @@ pub type Migrations = (
 	pallet_broker::migration::MigrateV1ToV2<Runtime>,
 	pallet_broker::migration::MigrateV2ToV3<Runtime>,
 	pallet_broker::migration::MigrateV3ToV4<Runtime, BrokerMigrationV4BlockConversion>,
-	pallet_broker::migration::MigrateV4ToV5<Runtime, BrokerFirstSaleBlock>,
+	pallet_broker::migration::MigrateV4ToV5<Runtime, BrokerFirstSaleRegion>,
 	pallet_session::migrations::v1::MigrateV0ToV1<
 		Runtime,
 		pallet_session::migrations::v1::InitOffenceSeverity<Runtime>,
@@ -669,19 +669,18 @@ impl pallet_broker::migration::v4::BlockToRelayHeightConversion<Runtime>
 	}
 }
 
-/// Relay-chain block at which the first-ever bulk Coretime sale started on Coretime Westend.
+/// `region_begin` (timeslice) of the first-ever bulk Coretime sale on Coretime Westend.
 ///
-/// The v5 migration uses this to approximate the current `sale_index`. This is chain-specific
-/// historical data that is not recoverable from on-chain storage, so it must be supplied here.
-// FIXME: replace the placeholder with the relay block number of the first `SaleInitialized`
-// event on Coretime Westend before merging. A wrong value yields a wrong `sale_index`.
-const CORETIME_WESTEND_FIRST_SALE_BLOCK: u32 = 0;
+/// Used by the v5 migration to reconstruct the current `sale_index`. Taken from the `region_begin`
+/// of the first `broker.SaleInitialized` event on Coretime Westend. This is historical data that
+/// is not recoverable from on-chain storage, so it is supplied here.
+const CORETIME_WESTEND_FIRST_SALE_REGION_BEGIN: u32 = 246_662;
 
-pub struct BrokerFirstSaleBlock;
+pub struct BrokerFirstSaleRegion;
 
-impl pallet_broker::migration::v5::SaleBlock<Runtime> for BrokerFirstSaleBlock {
-	fn init() -> u32 {
-		CORETIME_WESTEND_FIRST_SALE_BLOCK
+impl pallet_broker::migration::v5::FirstSaleRegion<Runtime> for BrokerFirstSaleRegion {
+	fn region_begin() -> u32 {
+		CORETIME_WESTEND_FIRST_SALE_REGION_BEGIN
 	}
 }
 

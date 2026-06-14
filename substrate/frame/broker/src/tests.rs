@@ -406,6 +406,44 @@ fn migration_works() {
 }
 
 #[test]
+fn migration_v5_reconstructs_sale_index_from_region_begin() {
+	use crate::migration::v5::{FirstSaleRegion, MigrateToV5Impl};
+	use frame_support::traits::UncheckedOnRuntimeUpgrade;
+
+	// Anchor: pretend the first-ever sale's region began at timeslice 100.
+	struct FirstRegion;
+	impl FirstSaleRegion<Test> for FirstRegion {
+		fn region_begin() -> Timeslice {
+			100
+		}
+	}
+
+	TestExt::new().endow(1, 1000).execute_with(|| {
+		assert_ok!(Broker::do_start_sales(100, 1));
+		let region_length = Configuration::<Test>::get().unwrap().region_length;
+
+		let migrate_with_region_begin = |region_begin: Timeslice, stale_index: SaleIndex| {
+			let mut sale = SaleInfo::<Test>::get().unwrap();
+			sale.region_begin = region_begin;
+			sale.region_end = region_begin + region_length;
+			// Simulate a pre-v5 record whose `sale_index` is not yet (correctly) set.
+			sale.sale_index = stale_index;
+			SaleInfo::<Test>::put(&sale);
+
+			let _ = <MigrateToV5Impl<Test, FirstRegion> as UncheckedOnRuntimeUpgrade>::on_runtime_upgrade();
+			SaleInfo::<Test>::get().unwrap().sale_index
+		};
+
+		// The first sale (region_begin == anchor) is index 1 — the bootstrap sale is the
+		// imaginary index 0.
+		assert_eq!(migrate_with_region_begin(100, 0), 1);
+
+		// Five regions later the current sale is index 6, regardless of any stale stored value.
+		assert_eq!(migrate_with_region_begin(100 + 5 * region_length, 999), 6);
+	});
+}
+
+#[test]
 fn renewal_works() {
 	let b = 100_000;
 	TestExt::new().endow(1, b).execute_with(move || {

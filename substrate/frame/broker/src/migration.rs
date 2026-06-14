@@ -406,22 +406,26 @@ pub mod v4 {
 pub mod v5 {
 	use super::*;
 	use frame_support::traits::Get;
-	use sp_runtime::traits::{SaturatedConversion, Saturating, Zero};
 
-	/// Provides the relay-chain block number at which the very first sale started. This is
-	/// needed to compute an accurate `sale_index` for the current sale during migration.
-	pub trait SaleBlock<T: Config> {
-		/// Returns the relay-chain block number at which the first-ever sale began.
-		fn init() -> RelayBlockNumberOf<T>;
+	/// Provides the `region_begin` (in timeslices) of the very first sale on this chain.
+	///
+	/// The v5 migration uses this to reconstruct the current `sale_index`. `region_begin` advances
+	/// by `region_length` timeslices on every sale, contiguously and with no gaps, so it is a
+	/// reliable anchor regardless of how the chain's relay-block cadence may have changed over
+	/// time. This value is historical and cannot be recovered from on-chain storage, so it must be
+	/// supplied by the implementor.
+	pub trait FirstSaleRegion<T: Config> {
+		/// Returns the `region_begin` (timeslice) of the first-ever sale.
+		fn region_begin() -> Timeslice;
 	}
 
 	/// Migration that adds the `sale_index` field to `SaleInfoRecord`.
 	///
-	/// Requires the implementor to supply the relay-chain block at which the first sale started
-	/// via the `SaleBlock` trait so that the current sale index can be approximated.
-	pub struct MigrateToV5Impl<T, SaleBlock>(PhantomData<T>, PhantomData<SaleBlock>);
+	/// Requires the implementor to supply the first sale's `region_begin` via the
+	/// [`FirstSaleRegion`] trait so the current sale index can be reconstructed.
+	pub struct MigrateToV5Impl<T, F>(PhantomData<T>, PhantomData<F>);
 
-	impl<T: Config, F: SaleBlock<T>> UncheckedOnRuntimeUpgrade for MigrateToV5Impl<T, F> {
+	impl<T: Config, F: FirstSaleRegion<T>> UncheckedOnRuntimeUpgrade for MigrateToV5Impl<T, F> {
 		#[cfg(feature = "try-runtime")]
 		fn pre_upgrade() -> Result<Vec<u8>, sp_runtime::TryRuntimeError> {
 			let sale_info_state = SaleInfo::<T>::get()
@@ -434,36 +438,36 @@ pub mod v5 {
 			let mut weight = T::DbWeight::get().reads(1);
 
 			if let Some(old_sale) = SaleInfo::<T>::get() {
-				let first_sale_block = F::init();
+				let first_region_begin = F::region_begin();
 
 				let config = Configuration::<T>::get()
 					.expect("Configuration must exist if SaleInfo exists; qed");
 				// Account for the Configuration read.
 				weight.saturating_accrue(T::DbWeight::get().reads(1));
 
-				// Consecutive sales start exactly one region apart (`rotate_sale` advances
-				// `region_begin` by `region_length` timeslices each cycle), so the relay-chain
-				// length of a full sale cycle is `region_length * timeslice_period`. The interlude
-				// and leadin are phases inside that window, not time added on top of it.
-				let timeslice_period = T::TimeslicePeriod::get();
-				let cycle_length: RelayBlockNumberOf<T> =
-					Into::<RelayBlockNumberOf<T>>::into(config.region_length as u32)
-						.saturating_mul(timeslice_period);
-
-				let blocks_since_first_sale = old_sale.sale_start.saturating_sub(first_sale_block);
-				let sale_index: SaleIndex = if !cycle_length.is_zero() {
-					(blocks_since_first_sale / cycle_length).saturated_into::<u32>()
+				// Sales rotate one region at a time: `region_begin` advances by `region_length`
+				// timeslices on every sale, contiguously and with no gaps. So the number of sales
+				// completed since the first is `(region_begin - first_region_begin) / region_length`,
+				// and the current index is that plus one — the first stored sale is index 1, because
+				// the bootstrap sale seeded in `do_start_sales` is the imaginary index 0.
+				//
+				// We count in timeslices rather than relay blocks because the relay-block spacing
+				// between sales is not uniform if the chain's block cadence ever changed.
+				let region_length = config.region_length;
+				let completed_regions = if region_length > 0 {
+					old_sale.region_begin.saturating_sub(first_region_begin) / region_length
 				} else {
 					0
 				};
+				let sale_index: SaleIndex = completed_regions.saturating_add(1);
 
 				log::info!(
 					target: LOG_TARGET,
-					"Migrating SaleInfo: first_sale_block={:?}, current_sale_start={:?}, \
-					cycle_length={:?}, sale_index={}",
-					first_sale_block,
-					old_sale.sale_start,
-					cycle_length,
+					"Migrating SaleInfo: first_region_begin={:?}, current_region_begin={:?}, \
+					region_length={:?}, sale_index={}",
+					first_region_begin,
+					old_sale.region_begin,
+					region_length,
 					sale_index,
 				);
 
@@ -515,6 +519,10 @@ pub mod v5 {
 						old_region_end == new_sale.region_end,
 					"Core SaleInfo fields should not have changed during migration"
 				);
+				ensure!(
+					new_sale.sale_index >= 1,
+					"An existing sale must have a sale_index of at least 1"
+				);
 			}
 
 			Ok(())
@@ -555,10 +563,10 @@ pub type MigrateV3ToV4<T, BlockConversion> = frame_support::migrations::Versione
 	<T as frame_system::Config>::DbWeight,
 >;
 
-pub type MigrateV4ToV5<T, SaleBlock> = frame_support::migrations::VersionedMigration<
+pub type MigrateV4ToV5<T, FirstSaleRegion> = frame_support::migrations::VersionedMigration<
 	4,
 	5,
-	v5::MigrateToV5Impl<T, SaleBlock>,
+	v5::MigrateToV5Impl<T, FirstSaleRegion>,
 	Pallet<T>,
 	<T as frame_system::Config>::DbWeight,
 >;

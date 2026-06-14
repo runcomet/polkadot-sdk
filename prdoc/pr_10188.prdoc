@@ -11,9 +11,11 @@ doc:
       A new `SaleIndex` type alias (`u32`) is introduced in `types.rs` for use across the pallet.
 
       A storage migration (`MigrateV4ToV5`) is included that back-fills `sale_index` for any
-      existing on-chain `SaleInfoRecord`. Implementors must provide the relay-chain block number
-      at which the first sale started via the `SaleBlock` trait so the current index can be
-      approximated from the elapsed cycle count.
+      existing on-chain `SaleInfoRecord`. Implementors must provide the `region_begin` (in
+      timeslices) of the first-ever sale via the `FirstSaleRegion` trait; the current index is then
+      reconstructed as `(region_begin - first_region_begin) / region_length + 1`. Counting in
+      timeslices (rather than relay blocks) is exact, since `region_begin` advances by
+      `region_length` on every sale with no gaps.
 
       The `STORAGE_VERSION` of `pallet-broker` is bumped from `4` to `5`.
 
