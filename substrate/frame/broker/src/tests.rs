@@ -407,7 +407,7 @@ fn migration_works() {
 
 #[test]
 fn migration_v5_reconstructs_sale_index_from_region_begin() {
-	use crate::migration::v5::{FirstSaleRegion, MigrateToV5Impl};
+	use crate::migration::v5::{old, FirstSaleRegion, MigrateToV5Impl};
 	use frame_support::traits::UncheckedOnRuntimeUpgrade;
 
 	// Anchor: pretend the first-ever sale's region began at timeslice 100.
@@ -421,14 +421,24 @@ fn migration_v5_reconstructs_sale_index_from_region_begin() {
 	TestExt::new().endow(1, 1000).execute_with(|| {
 		assert_ok!(Broker::do_start_sales(100, 1));
 		let region_length = Configuration::<Test>::get().unwrap().region_length;
+		let template = SaleInfo::<Test>::get().unwrap();
 
-		let migrate_with_region_begin = |region_begin: Timeslice, stale_index: SaleIndex| {
-			let mut sale = SaleInfo::<Test>::get().unwrap();
-			sale.region_begin = region_begin;
-			sale.region_end = region_begin + region_length;
-			// Simulate a pre-v5 record whose `sale_index` is not yet (correctly) set.
-			sale.sale_index = stale_index;
-			SaleInfo::<Test>::put(&sale);
+		let migrate_with_region_begin = |region_begin: Timeslice| {
+			// Write a *genuinely pre-v5* record (the old layout, without `sale_index`), exactly as
+			// it would exist on chain before this migration. Reading it with the new struct would
+			// fail to decode, so this is what exercises the old-layout read path.
+			old::SaleInfo::<Test>::put(old::SaleInfoRecord {
+				sale_start: template.sale_start,
+				leadin_length: template.leadin_length,
+				end_price: template.end_price,
+				region_begin,
+				region_end: region_begin + region_length,
+				ideal_cores_sold: template.ideal_cores_sold,
+				cores_offered: template.cores_offered,
+				first_core: template.first_core,
+				sellout_price: template.sellout_price,
+				cores_sold: template.cores_sold,
+			});
 
 			let _ = <MigrateToV5Impl<Test, FirstRegion> as UncheckedOnRuntimeUpgrade>::on_runtime_upgrade();
 			SaleInfo::<Test>::get().unwrap().sale_index
@@ -436,10 +446,10 @@ fn migration_v5_reconstructs_sale_index_from_region_begin() {
 
 		// The first sale (region_begin == anchor) is index 1 — the bootstrap sale is the
 		// imaginary index 0.
-		assert_eq!(migrate_with_region_begin(100, 0), 1);
+		assert_eq!(migrate_with_region_begin(100), 1);
 
-		// Five regions later the current sale is index 6, regardless of any stale stored value.
-		assert_eq!(migrate_with_region_begin(100 + 5 * region_length, 999), 6);
+		// Five regions later the current sale is index 6.
+		assert_eq!(migrate_with_region_begin(100 + 5 * region_length), 6);
 	});
 }
 

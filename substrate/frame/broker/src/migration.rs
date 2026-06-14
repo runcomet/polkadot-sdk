@@ -407,6 +407,40 @@ pub mod v5 {
 	use super::*;
 	use frame_support::traits::Get;
 
+	/// The pre-v5 `SaleInfo` storage, holding the `SaleInfoRecord` layout *without* `sale_index`.
+	///
+	/// The existing on-chain value is encoded in this older layout, so it cannot be decoded with
+	/// the current [`crate::SaleInfoRecord`] (which has the extra trailing field). The migration
+	/// reads the value through this alias and writes back the new layout.
+	pub(crate) mod old {
+		use super::*;
+		use codec::MaxEncodedLen;
+		use frame_support::{
+			pallet_prelude::{Debug, OptionQuery, TypeInfo},
+			storage_alias,
+		};
+
+		#[storage_alias]
+		pub type SaleInfo<T: Config> = StorageValue<Pallet<T>, SaleInfoRecordOf<T>, OptionQuery>;
+		pub type SaleInfoRecordOf<T> = SaleInfoRecord<BalanceOf<T>, RelayBlockNumberOf<T>>;
+
+		/// The `SaleInfoRecord` layout prior to v5 — identical to the current one but without the
+		/// trailing `sale_index` field.
+		#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug, TypeInfo, MaxEncodedLen)]
+		pub struct SaleInfoRecord<Balance, RelayBlockNumber> {
+			pub sale_start: RelayBlockNumber,
+			pub leadin_length: RelayBlockNumber,
+			pub end_price: Balance,
+			pub region_begin: Timeslice,
+			pub region_end: Timeslice,
+			pub ideal_cores_sold: CoreIndex,
+			pub cores_offered: CoreIndex,
+			pub first_core: CoreIndex,
+			pub sellout_price: Option<Balance>,
+			pub cores_sold: CoreIndex,
+		}
+	}
+
 	/// Provides the `region_begin` (in timeslices) of the very first sale on this chain.
 	///
 	/// The v5 migration uses this to reconstruct the current `sale_index`. `region_begin` advances
@@ -428,7 +462,7 @@ pub mod v5 {
 	impl<T: Config, F: FirstSaleRegion<T>> UncheckedOnRuntimeUpgrade for MigrateToV5Impl<T, F> {
 		#[cfg(feature = "try-runtime")]
 		fn pre_upgrade() -> Result<Vec<u8>, sp_runtime::TryRuntimeError> {
-			let sale_info_state = SaleInfo::<T>::get()
+			let sale_info_state = old::SaleInfo::<T>::get()
 				.map(|sale| (sale.sale_start, sale.region_begin, sale.region_end));
 			Ok(sale_info_state.encode())
 		}
@@ -437,7 +471,7 @@ pub mod v5 {
 			// We will read SaleInfo and, if present, also Configuration.
 			let mut weight = T::DbWeight::get().reads(1);
 
-			if let Some(old_sale) = SaleInfo::<T>::get() {
+			if let Some(old_sale) = old::SaleInfo::<T>::get() {
 				let first_region_begin = F::region_begin();
 
 				let config = Configuration::<T>::get()
@@ -447,9 +481,10 @@ pub mod v5 {
 
 				// Sales rotate one region at a time: `region_begin` advances by `region_length`
 				// timeslices on every sale, contiguously and with no gaps. So the number of sales
-				// completed since the first is `(region_begin - first_region_begin) / region_length`,
-				// and the current index is that plus one — the first stored sale is index 1, because
-				// the bootstrap sale seeded in `do_start_sales` is the imaginary index 0.
+				// completed since the first is `(region_begin - first_region_begin) /
+				// region_length`, and the current index is that plus one — the first stored
+				// sale is index 1, because the bootstrap sale seeded in `do_start_sales` is the
+				// imaginary index 0.
 				//
 				// We count in timeslices rather than relay blocks because the relay-block spacing
 				// between sales is not uniform if the chain's block cadence ever changed.
