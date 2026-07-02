@@ -83,19 +83,31 @@ impl<T: pallet::Config<I>, I: 'static> NextCollectionIdProvider for IncrementalN
 		let id = pallet::NextCollectionId::<T, I>::get()
 			.or(Self::Id::initial_value())
 			.ok_or(pallet::Error::<T, I>::UnknownCollection)?;
-		let next = id.increment().ok_or(pallet::Error::<T, I>::UnknownCollection)?;
-		pallet::NextCollectionId::<T, I>::put(next);
+		let next_id = id.increment();
+		pallet::NextCollectionId::<T, I>::set(next_id);
+		pallet::Pallet::<T, I>::deposit_event(pallet::Event::NextCollectionIdIncremented {
+			next_id,
+		});
 		Ok(id)
+	}
+
+	fn claim(id: Self::Id) {
+		let current = pallet::NextCollectionId::<T, I>::get().or(Self::Id::initial_value());
+		if current.map_or(true, |current| id >= current) {
+			let next_id = id.increment();
+			pallet::NextCollectionId::<T, I>::set(next_id);
+			pallet::Pallet::<T, I>::deposit_event(pallet::Event::NextCollectionIdIncremented {
+				next_id,
+			});
+		}
 	}
 }
 
-impl<Id: Member + Parameter + MaxEncodedLen + Copy + Incrementable + PartialOrd>
-	NextCollectionIdProvider for DisabledNextId<Id>
-{
-	type Id = Id;
+impl<T: pallet::Config<I>, I: 'static> NextCollectionIdProvider for DisabledNextId<T, I> {
+	type Id = T::CollectionId;
 
-	fn next() -> Result<Id, DispatchError> {
-		Err(DispatchError::Other("create() is disabled; use create_with_id()"))
+	fn next() -> Result<Self::Id, DispatchError> {
+		Err(pallet::Error::<T, I>::MethodDisabled.into())
 	}
 }
 
@@ -765,9 +777,6 @@ pub mod pallet {
 				Event::Created { collection, creator: owner, owner: admin },
 			)?;
 
-			let next_id = NextCollectionId::<T, I>::get();
-			Self::deposit_event(Event::NextCollectionIdIncremented { next_id });
-
 			Ok(())
 		}
 
@@ -804,8 +813,6 @@ pub mod pallet {
 				Zero::zero(),
 				Event::ForceCreated { collection, owner },
 			)?;
-			let next_id = NextCollectionId::<T, I>::get();
-			Self::deposit_event(Event::NextCollectionIdIncremented { next_id });
 
 			Ok(())
 		}
@@ -1983,6 +1990,8 @@ pub mod pallet {
 				Error::<T, I>::WrongSetting
 			);
 
+			T::NextId::claim(collection);
+
 			Self::do_create_collection(
 				collection,
 				owner.clone(),
@@ -1991,14 +2000,6 @@ pub mod pallet {
 				T::CollectionDeposit::get(),
 				Event::Created { collection, creator: owner, owner: admin },
 			)?;
-
-			NextCollectionId::<T, I>::mutate(|maybe| {
-				if let Some(ref current) = *maybe {
-					if collection >= *current {
-						*maybe = collection.increment();
-					}
-				}
-			});
 			Ok(())
 		}
 	}

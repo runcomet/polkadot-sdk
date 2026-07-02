@@ -3906,6 +3906,9 @@ fn create_with_id_basic_should_work() {
 			creator: owner,
 			owner: admin,
 		}));
+
+		// counter was unset; the claim seeds it past the claimed ID
+		assert_eq!(NextCollectionId::<Test>::get(), Some(2));
 	});
 }
 
@@ -4001,6 +4004,13 @@ fn create_with_id_does_not_bump_when_behind() {
 
 		assert_eq!(NextCollectionId::<Test>::get(), Some(11));
 		assert_eq!(collections(), vec![(account(1), 1), (account(1), 10)]);
+	});
+}
+
+#[test]
+fn disabled_next_id_returns_method_disabled() {
+	new_test_ext().execute_with(|| {
+		assert_eq!(DisabledNextId::<Test>::next(), Err(Error::<Test>::MethodDisabled.into()));
 	});
 }
 

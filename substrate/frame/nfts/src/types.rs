@@ -621,10 +621,16 @@ pub struct PreSignedAttributes<CollectionId, ItemId, AccountId, Deadline> {
 	pub deadline: Deadline,
 }
 
+/// Source of collection IDs for `create()` and `force_create()`.
 pub trait NextCollectionIdProvider {
+	/// The collection ID type.
 	type Id: Member + Parameter + MaxEncodedLen + Copy + Incrementable + PartialOrd;
 
+	/// Return the next collection ID, advancing any internal state.
 	fn next() -> Result<Self::Id, DispatchError>;
+
+	/// Claim `id` so later `next()` calls won't return it. No-op by default.
+	fn claim(_id: Self::Id) {}
 }
 
 /// Default implementation. Reads and increments the `NextCollectionId` storage item.
@@ -632,5 +638,5 @@ pub trait NextCollectionIdProvider {
 pub struct IncrementalNextId<T, I = ()>(core::marker::PhantomData<(T, I)>);
 
 /// Use this when the runtime only uses `create_with_id()`.
-/// Makes `create()` and `force_create()` return an error.
-pub struct DisabledNextId<Id>(core::marker::PhantomData<Id>);
+/// Makes `create()` and `force_create()` fail with `Error::MethodDisabled`.
+pub struct DisabledNextId<T, I = ()>(core::marker::PhantomData<(T, I)>);

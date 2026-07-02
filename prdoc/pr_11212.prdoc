@@ -6,35 +6,9 @@ title: Origin -> CollectionId
 doc:
   - audience: Runtime Dev
     description: |
-      Adds a new `create_with_id` extrinsic to `pallet-nfts` that allows a caller to
-      create an NFT collection at a caller-specified `CollectionId`, rather than
-      relying on the pallet's internal auto-incrementing counter.
-
-      This is useful for runtimes that need a deterministic, externally-derived
-      collection ID — for example, to create a one-to-one mapping between a DAO
-      and its NFT collection without maintaining a separate lookup table or wrapper
-      pallet.
-
-      **New `NextId` config item**
-
-      A `type NextId: NextCollectionIdProvider` associated type has been added to
-      `pallet_nfts::Config`. Two implementations are provided out of the box:
-
-      - `IncrementalNextId<T, I>` — the default. Reads and increments the
-        `NextCollectionId` storage item, preserving the existing behaviour for
-        `create()` and `force_create()`.
-      - `DisabledNextId<Id>` — causes `create()` and `force_create()` to return
-        `Err`, for runtimes that exclusively use `create_with_id()`.
-
-      **`NextCollectionId` counter integrity**
-
-      When `create_with_id` is called with a `CollectionId` that is greater than or
-      equal to the current `NextCollectionId` value, the counter is bumped to
-      `collection.increment()` so that subsequent `create()` calls do not collide
-      with the manually-claimed ID. IDs below the current counter are accepted
-      without modifying the counter.
-
-      **Extrinsic**
+      Adds a `create_with_id` extrinsic to `pallet-nfts` that creates a collection
+      at a caller-specified `CollectionId` instead of the auto-incrementing
+      counter, e.g. for a 1:1 mapping between a DAO and its collection.
 
       ```rust
       pub fn create_with_id(
@@ -45,13 +19,32 @@ doc:
       ) -> DispatchResult
       ```
 
-      The call is gated by the existing `CreateOrigin` and will fail with
-      `CollectionIdInUse` if the ID is already taken, or `WrongSetting` if
-      `DepositRequired` is disabled in the supplied config.
+      Gated by `CreateOrigin`. Fails with `CollectionIdInUse` if the ID is taken
+      and `WrongSetting` if `DepositRequired` is disabled in the config.
+
+      Breaking: `pallet_nfts::Config` gains a required
+      `type NextId: NextCollectionIdProvider`. The provider is the sole source of
+      collection IDs; `create()` and `force_create()` no longer access
+      `NextCollectionId` directly. Provided implementations:
+
+      - `IncrementalNextId<T, I>`: reads and increments `NextCollectionId`,
+        keeping the existing behaviour.
+      - `DisabledNextId<T, I>`: `create()` and `force_create()` fail with
+        `Error::MethodDisabled`, for runtimes that only use `create_with_id()`.
+
+      `create_with_id` calls `claim(id)` on the provider. With
+      `IncrementalNextId`, claiming an ID at or above the counter (or with the
+      counter unset) sets the counter to `id.increment()` so later `create()`
+      calls cannot collide. Lower IDs leave the counter unchanged. Custom
+      providers can track used IDs via `next()` and `claim(id)`.
+
+      `NextCollectionIdIncremented` is now emitted when an ID is allocated,
+      before `Created`/`ForceCreated`, and from `create_with_id` when the claim
+      moves the counter.
 
 crates:
   - name: pallet-nfts
-    bump: minor
+    bump: major
   - name: pallet-nft-fractionalization
     bump: patch
   - name: asset-hub-rococo-runtime
