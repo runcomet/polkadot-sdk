@@ -890,11 +890,11 @@ benchmarks_instance_pallet! {
 
 		ensure!(!Collection::<T, I>::contains_key(&collection), "Collection ID already in use");
 
-		let origin = T::CreateOrigin::try_successful_origin(&collection)
+		let origin = T::CreateWithIdOrigin::try_successful_origin(&collection)
 			.map_err(|_| BenchmarkError::Weightless)?;
 
 
-		let caller = T::CreateOrigin::ensure_origin(origin.clone(), &collection)
+		let caller = T::CreateWithIdOrigin::ensure_origin(origin.clone(), &collection)
 			.map_err(|_| BenchmarkError::Weightless)?;
 
 

@@ -640,3 +640,38 @@ pub struct IncrementalNextId<T, I = ()>(core::marker::PhantomData<(T, I)>);
 /// Use this when the runtime only uses `create_with_id()`.
 /// Makes `create()` and `force_create()` fail with `Error::MethodDisabled`.
 pub struct DisabledNextId<T, I = ()>(core::marker::PhantomData<(T, I)>);
+
+impl<T: pallet::Config<I>, I: 'static> NextCollectionIdProvider for IncrementalNextId<T, I> {
+	type Id = T::CollectionId;
+
+	fn next() -> Result<Self::Id, DispatchError> {
+		let id = pallet::NextCollectionId::<T, I>::get()
+			.or(Self::Id::initial_value())
+			.ok_or(pallet::Error::<T, I>::UnknownCollection)?;
+		let next_id = id.increment();
+		pallet::NextCollectionId::<T, I>::set(next_id);
+		pallet::Pallet::<T, I>::deposit_event(pallet::Event::NextCollectionIdIncremented {
+			next_id,
+		});
+		Ok(id)
+	}
+
+	fn claim(id: Self::Id) {
+		let current = pallet::NextCollectionId::<T, I>::get().or(Self::Id::initial_value());
+		if current.map_or(true, |current| id >= current) {
+			let next_id = id.increment();
+			pallet::NextCollectionId::<T, I>::set(next_id);
+			pallet::Pallet::<T, I>::deposit_event(pallet::Event::NextCollectionIdIncremented {
+				next_id,
+			});
+		}
+	}
+}
+
+impl<T: pallet::Config<I>, I: 'static> NextCollectionIdProvider for DisabledNextId<T, I> {
+	type Id = T::CollectionId;
+
+	fn next() -> Result<Self::Id, DispatchError> {
+		Err(pallet::Error::<T, I>::MethodDisabled.into())
+	}
+}

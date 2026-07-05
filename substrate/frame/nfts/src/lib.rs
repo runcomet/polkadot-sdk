@@ -76,41 +76,6 @@ pub const LOG_TARGET: &'static str = "runtime::nfts";
 /// A type alias for the account ID type used in the dispatchable functions of this pallet.
 type AccountIdLookupOf<T> = <<T as SystemConfig>::Lookup as StaticLookup>::Source;
 
-impl<T: pallet::Config<I>, I: 'static> NextCollectionIdProvider for IncrementalNextId<T, I> {
-	type Id = T::CollectionId;
-
-	fn next() -> Result<Self::Id, DispatchError> {
-		let id = pallet::NextCollectionId::<T, I>::get()
-			.or(Self::Id::initial_value())
-			.ok_or(pallet::Error::<T, I>::UnknownCollection)?;
-		let next_id = id.increment();
-		pallet::NextCollectionId::<T, I>::set(next_id);
-		pallet::Pallet::<T, I>::deposit_event(pallet::Event::NextCollectionIdIncremented {
-			next_id,
-		});
-		Ok(id)
-	}
-
-	fn claim(id: Self::Id) {
-		let current = pallet::NextCollectionId::<T, I>::get().or(Self::Id::initial_value());
-		if current.map_or(true, |current| id >= current) {
-			let next_id = id.increment();
-			pallet::NextCollectionId::<T, I>::set(next_id);
-			pallet::Pallet::<T, I>::deposit_event(pallet::Event::NextCollectionIdIncremented {
-				next_id,
-			});
-		}
-	}
-}
-
-impl<T: pallet::Config<I>, I: 'static> NextCollectionIdProvider for DisabledNextId<T, I> {
-	type Id = T::CollectionId;
-
-	fn next() -> Result<Self::Id, DispatchError> {
-		Err(pallet::Error::<T, I>::MethodDisabled.into())
-	}
-}
-
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
@@ -177,9 +142,8 @@ pub mod pallet {
 		/// of the implementation both return `None`, the automatic CollectionId generation
 		/// should not be used. So the `create` and `force_create` extrinsics and the
 		/// `create_collection` function will return an `UnknownCollection` Error. Instead use
-		/// the `create_collection_with_id` function. However, if the `Incrementable` trait
-		/// implementation has an incremental order, the `create_collection_with_id` function
-		/// should not be used as it can claim a value in the ID sequence.
+		/// the `create_collection_with_id` function, which claims the given ID so a later
+		/// `next()` cannot reissue it.
 		type CollectionId: Member + Parameter + MaxEncodedLen + Copy + Incrementable + PartialOrd;
 
 		/// The type used to identify a unique item within a collection.
@@ -195,6 +159,18 @@ pub mod pallet {
 		/// Standard collection creation is only allowed if the origin attempting it and the
 		/// collection are in this set.
 		type CreateOrigin: EnsureOriginWithArg<
+			Self::RuntimeOrigin,
+			Self::CollectionId,
+			Success = Self::AccountId,
+		>;
+
+		/// Origin allowed to call `create_with_id`, which takes a caller-chosen collection ID.
+		/// Kept separate from `CreateOrigin` so it can be restricted on its own: an unrestricted
+		/// origin lets a caller take any free ID and advance the counter past it. `Success` owns
+		/// the created collection and pays `CollectionDeposit`. Restrict with a member set such as
+		/// `EnsureSignedBy<Curators, AccountId>`; to also limit which IDs may be taken, gate on the
+		/// `CollectionId` argument in a custom `EnsureOriginWithArg`.
+		type CreateWithIdOrigin: EnsureOriginWithArg<
 			Self::RuntimeOrigin,
 			Self::CollectionId,
 			Success = Self::AccountId,
@@ -1968,6 +1944,22 @@ pub mod pallet {
 			Self::do_set_attributes_pre_signed(origin, data, signer)
 		}
 
+		/// Issue a new collection of non-fungible items at a caller-chosen `collection` ID,
+		/// instead of the auto-incrementing counter used by `create`.
+		///
+		/// The origin must conform to `CreateWithIdOrigin` and the returned account becomes the
+		/// owner. `CollectionDeposit` funds of that account are reserved. The chosen ID is
+		/// claimed on the `NextId` provider so a later `create` cannot reissue it.
+		///
+		/// Parameters:
+		/// - `collection`: The requested ID for the new collection.
+		/// - `admin`: The admin of this collection.
+		///
+		/// Fails with `CollectionIdInUse` if the ID is taken.
+		///
+		/// Emits `Created` event when successful.
+		///
+		/// Weight: `O(1)`
 		#[pallet::call_index(39)]
 		#[pallet::weight(T::WeightInfo::create_with_id())]
 		pub fn create_with_id(
@@ -1976,7 +1968,7 @@ pub mod pallet {
 			admin: AccountIdLookupOf<T>,
 			config: CollectionConfigFor<T, I>,
 		) -> DispatchResult {
-			let owner = T::CreateOrigin::ensure_origin(origin, &collection)?;
+			let owner = T::CreateWithIdOrigin::ensure_origin(origin, &collection)?;
 
 			ensure!(
 				!Collection::<T, I>::contains_key(&collection),

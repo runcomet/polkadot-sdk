@@ -1182,6 +1182,7 @@ impl pallet_nfts::Config for Runtime {
 	type ItemId = ItemId;
 	type Currency = Balances;
 	type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
+	type CreateWithIdOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
 	type NextId = pallet_nfts::IncrementalNextId<Runtime>;
 	type ForceOrigin = AssetsForceOrigin;
 	type Locker = ();
