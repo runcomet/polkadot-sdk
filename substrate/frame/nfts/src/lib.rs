@@ -165,11 +165,11 @@ pub mod pallet {
 		>;
 
 		/// Origin allowed to call `create_with_id`, which takes a caller-chosen collection ID.
-		/// Kept separate from `CreateOrigin` so it can be restricted on its own: an unrestricted
-		/// origin lets a caller take any free ID and advance the counter past it. `Success` owns
-		/// the created collection and pays `CollectionDeposit`. Restrict with a member set such as
-		/// `EnsureSignedBy<Curators, AccountId>`; to also limit which IDs may be taken, gate on the
-		/// `CollectionId` argument in a custom `EnsureOriginWithArg`.
+		/// Separate from `CreateOrigin` so picking an explicit ID can be gated on its own; an
+		/// unrestricted origin can take any free ID and advance the counter past it. `Success`
+		/// owns the collection and pays `CollectionDeposit`. Limit the caller with a member set
+		/// (`EnsureSignedBy` over `SortedMembers`); to also limit which IDs, use a custom
+		/// `EnsureOriginWithArg` that inspects the `CollectionId`.
 		type CreateWithIdOrigin: EnsureOriginWithArg<
 			Self::RuntimeOrigin,
 			Self::CollectionId,
