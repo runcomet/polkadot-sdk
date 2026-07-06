@@ -678,7 +678,7 @@ const CORETIME_WESTEND_FIRST_SALE_REGION_BEGIN: u32 = 246_662;
 
 pub struct BrokerFirstSaleRegion;
 
-impl pallet_broker::migration::v5::FirstSaleRegion<Runtime> for BrokerFirstSaleRegion {
+impl pallet_broker::migration::v5::FirstSaleRegion for BrokerFirstSaleRegion {
 	fn region_begin() -> u32 {
 		CORETIME_WESTEND_FIRST_SALE_REGION_BEGIN
 	}

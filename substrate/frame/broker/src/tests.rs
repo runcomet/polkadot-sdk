@@ -412,7 +412,7 @@ fn migration_v5_reconstructs_sale_index_from_region_begin() {
 
 	// Anchor: pretend the first-ever sale's region began at timeslice 100.
 	struct FirstRegion;
-	impl FirstSaleRegion<Test> for FirstRegion {
+	impl FirstSaleRegion for FirstRegion {
 		fn region_begin() -> Timeslice {
 			100
 		}
@@ -450,6 +450,48 @@ fn migration_v5_reconstructs_sale_index_from_region_begin() {
 
 		// Five regions later the current sale is index 6.
 		assert_eq!(migrate_with_region_begin(100 + 5 * region_length), 6);
+	});
+}
+
+#[test]
+fn migration_v5_defaults_sale_index_when_configuration_missing() {
+	use crate::migration::v5::{old, FirstSaleRegion, MigrateToV5Impl};
+	use frame_support::traits::UncheckedOnRuntimeUpgrade;
+
+	struct FirstRegion;
+	impl FirstSaleRegion for FirstRegion {
+		fn region_begin() -> Timeslice {
+			100
+		}
+	}
+
+	TestExt::new().endow(1, 1000).execute_with(|| {
+		assert_ok!(Broker::do_start_sales(100, 1));
+		let region_length = Configuration::<Test>::get().unwrap().region_length;
+		let template = SaleInfo::<Test>::get().unwrap();
+
+		// Pre-v5 record present, but Configuration gone. The migration must not panic and must
+		// still rewrite the record in the new layout.
+		old::SaleInfo::<Test>::put(old::SaleInfoRecord {
+			sale_start: template.sale_start,
+			leadin_length: template.leadin_length,
+			end_price: template.end_price,
+			region_begin: 100 + 5 * region_length,
+			region_end: 100 + 6 * region_length,
+			ideal_cores_sold: template.ideal_cores_sold,
+			cores_offered: template.cores_offered,
+			first_core: template.first_core,
+			sellout_price: template.sellout_price,
+			cores_sold: template.cores_sold,
+		});
+		Configuration::<Test>::kill();
+
+		let _ =
+			<MigrateToV5Impl<Test, FirstRegion> as UncheckedOnRuntimeUpgrade>::on_runtime_upgrade();
+
+		// The record is still decodable under the new layout, with the fallback index.
+		let migrated = SaleInfo::<Test>::get().expect("record rewritten in new layout");
+		assert_eq!(migrated.sale_index, 1);
 	});
 }
 
