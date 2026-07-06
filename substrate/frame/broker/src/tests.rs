@@ -410,7 +410,6 @@ fn migration_v5_reconstructs_sale_index_from_region_begin() {
 	use crate::migration::v5::{old, FirstSaleRegion, MigrateToV5Impl};
 	use frame_support::traits::UncheckedOnRuntimeUpgrade;
 
-	// Anchor: pretend the first-ever sale's region began at timeslice 100.
 	struct FirstRegion;
 	impl FirstSaleRegion for FirstRegion {
 		fn region_begin() -> Timeslice {
@@ -424,9 +423,7 @@ fn migration_v5_reconstructs_sale_index_from_region_begin() {
 		let template = SaleInfo::<Test>::get().unwrap();
 
 		let migrate_with_region_begin = |region_begin: Timeslice| {
-			// Write a *genuinely pre-v5* record (the old layout, without `sale_index`), exactly as
-			// it would exist on chain before this migration. Reading it with the new struct would
-			// fail to decode, so this is what exercises the old-layout read path.
+			// Write the pre-v5 record (old layout, no `sale_index`) that the migration reads.
 			old::SaleInfo::<Test>::put(old::SaleInfoRecord {
 				sale_start: template.sale_start,
 				leadin_length: template.leadin_length,
@@ -444,8 +441,7 @@ fn migration_v5_reconstructs_sale_index_from_region_begin() {
 			SaleInfo::<Test>::get().unwrap().sale_index
 		};
 
-		// The first sale (region_begin == anchor) is index 1 — the bootstrap sale is the
-		// imaginary index 0.
+		// First sale (region_begin == anchor) is index 1; bootstrap sale is index 0.
 		assert_eq!(migrate_with_region_begin(100), 1);
 
 		// Five regions later the current sale is index 6.
@@ -470,8 +466,7 @@ fn migration_v5_defaults_sale_index_when_configuration_missing() {
 		let region_length = Configuration::<Test>::get().unwrap().region_length;
 		let template = SaleInfo::<Test>::get().unwrap();
 
-		// Pre-v5 record present, but Configuration gone. The migration must not panic and must
-		// still rewrite the record in the new layout.
+		// Pre-v5 record present, Configuration gone: migration must not panic, still rewrites it.
 		old::SaleInfo::<Test>::put(old::SaleInfoRecord {
 			sale_start: template.sale_start,
 			leadin_length: template.leadin_length,
@@ -489,9 +484,35 @@ fn migration_v5_defaults_sale_index_when_configuration_missing() {
 		let _ =
 			<MigrateToV5Impl<Test, FirstRegion> as UncheckedOnRuntimeUpgrade>::on_runtime_upgrade();
 
-		// The record is still decodable under the new layout, with the fallback index.
+		// Record still rewritten, with the fallback index.
 		let migrated = SaleInfo::<Test>::get().expect("record rewritten in new layout");
 		assert_eq!(migrated.sale_index, 1);
+	});
+}
+
+#[cfg(feature = "try-runtime")]
+#[test]
+fn migration_v5_post_upgrade_accepts_missing_sale_info() {
+	use crate::migration::v5::{FirstSaleRegion, MigrateToV5Impl};
+	use frame_support::traits::UncheckedOnRuntimeUpgrade;
+
+	struct FirstRegion;
+	impl FirstSaleRegion for FirstRegion {
+		fn region_begin() -> Timeslice {
+			100
+		}
+	}
+
+	type Migration = MigrateToV5Impl<Test, FirstRegion>;
+
+	TestExt::new().execute_with(|| {
+		// No SaleInfo: on_runtime_upgrade skips, so pre/post_upgrade must agree it is valid.
+		assert!(SaleInfo::<Test>::get().is_none());
+
+		let state = <Migration as UncheckedOnRuntimeUpgrade>::pre_upgrade().unwrap();
+		let _ = <Migration as UncheckedOnRuntimeUpgrade>::on_runtime_upgrade();
+		assert!(SaleInfo::<Test>::get().is_none());
+		assert_ok!(<Migration as UncheckedOnRuntimeUpgrade>::post_upgrade(state));
 	});
 }
 

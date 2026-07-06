@@ -669,11 +669,8 @@ impl pallet_broker::migration::v4::BlockToRelayHeightConversion<Runtime>
 	}
 }
 
-/// `region_begin` (timeslice) of the first-ever bulk Coretime sale on Coretime Westend.
-///
-/// Used by the v5 migration to reconstruct the current `sale_index`. Taken from the `region_begin`
-/// of the first `broker.SaleInitialized` event on Coretime Westend. This is historical data that
-/// is not recoverable from on-chain storage, so it is supplied here.
+/// `region_begin` of the first bulk Coretime sale on Westend, from the first
+/// `broker.SaleInitialized` event. Anchors the v5 migration's `sale_index` reconstruction.
 const CORETIME_WESTEND_FIRST_SALE_REGION_BEGIN: u32 = 246_662;
 
 pub struct BrokerFirstSaleRegion;

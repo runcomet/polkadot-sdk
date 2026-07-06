@@ -4,20 +4,15 @@ doc:
   - audience: Runtime Dev
     description: |
       Adds a sequential `sale_index` field to `SaleInfoRecord` and the `SaleInitialized` event
-      in `pallet-broker`. The index starts at `0` for the bootstrap sale created internally by
-      `do_start_sales` and is incremented by `1` on every call to `rotate_sale`, so each bulk
-      Coretime sale period has a unique, monotonically increasing identifier.
+      in `pallet-broker`. It is `0` for the bootstrap sale from `do_start_sales` and increments
+      by `1` on each `rotate_sale`, giving every bulk Coretime sale a unique index. A `SaleIndex`
+      (`u32`) type alias is added in `types.rs`.
 
-      A new `SaleIndex` type alias (`u32`) is introduced in `types.rs` for use across the pallet.
+      Migration `MigrateV4ToV5` back-fills `sale_index` for an existing on-chain `SaleInfoRecord`.
+      Implementors supply the first sale's `region_begin` (timeslices) via the `FirstSaleRegion`
+      trait; the index is reconstructed as `(region_begin - first_region_begin) / region_length + 1`.
 
-      A storage migration (`MigrateV4ToV5`) is included that back-fills `sale_index` for any
-      existing on-chain `SaleInfoRecord`. Implementors must provide the `region_begin` (in
-      timeslices) of the first-ever sale via the `FirstSaleRegion` trait; the current index is then
-      reconstructed as `(region_begin - first_region_begin) / region_length + 1`. Counting in
-      timeslices (rather than relay blocks) is exact, since `region_begin` advances by
-      `region_length` on every sale with no gaps.
-
-      The `STORAGE_VERSION` of `pallet-broker` is bumped from `4` to `5`.
+      `STORAGE_VERSION` is bumped from `4` to `5`.
 
 crates:
   - name: pallet-broker

@@ -407,11 +407,7 @@ pub mod v5 {
 	use super::*;
 	use frame_support::traits::Get;
 
-	/// The pre-v5 `SaleInfo` storage, holding the `SaleInfoRecord` layout *without* `sale_index`.
-	///
-	/// The existing on-chain value is encoded in this older layout, so it cannot be decoded with
-	/// the current [`crate::SaleInfoRecord`] (which has the extra trailing field). The migration
-	/// reads the value through this alias and writes back the new layout.
+	/// Pre-v5 `SaleInfo` storage: the `SaleInfoRecord` layout without `sale_index`.
 	pub(crate) mod old {
 		use super::*;
 		use codec::MaxEncodedLen;
@@ -424,8 +420,7 @@ pub mod v5 {
 		pub type SaleInfo<T: Config> = StorageValue<Pallet<T>, SaleInfoRecordOf<T>, OptionQuery>;
 		pub type SaleInfoRecordOf<T> = SaleInfoRecord<BalanceOf<T>, RelayBlockNumberOf<T>>;
 
-		/// The `SaleInfoRecord` layout prior to v5 — identical to the current one but without the
-		/// trailing `sale_index` field.
+		/// Pre-v5 `SaleInfoRecord`: the current layout without `sale_index`.
 		#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug, TypeInfo, MaxEncodedLen)]
 		pub struct SaleInfoRecord<Balance, RelayBlockNumber> {
 			pub sale_start: RelayBlockNumber,
@@ -441,22 +436,13 @@ pub mod v5 {
 		}
 	}
 
-	/// Provides the `region_begin` (in timeslices) of the very first sale on this chain.
-	///
-	/// The v5 migration uses this to reconstruct the current `sale_index`. `region_begin` advances
-	/// by `region_length` timeslices on every sale, contiguously and with no gaps, so it is a
-	/// reliable anchor regardless of how the chain's relay-block cadence may have changed over
-	/// time. This value is historical and cannot be recovered from on-chain storage, so it must be
-	/// supplied by the implementor.
+	/// Supplies the first sale's `region_begin` (timeslice), used to reconstruct `sale_index`.
+	/// Historical data, not recoverable from on-chain storage.
 	pub trait FirstSaleRegion {
-		/// Returns the `region_begin` (timeslice) of the first-ever sale.
 		fn region_begin() -> Timeslice;
 	}
 
-	/// Migration that adds the `sale_index` field to `SaleInfoRecord`.
-	///
-	/// Requires the implementor to supply the first sale's `region_begin` via the
-	/// [`FirstSaleRegion`] trait so the current sale index can be reconstructed.
+	/// Adds the `sale_index` field to `SaleInfoRecord`.
 	pub struct MigrateToV5Impl<T, F>(PhantomData<T>, PhantomData<F>);
 
 	impl<T: Config, F: FirstSaleRegion> UncheckedOnRuntimeUpgrade for MigrateToV5Impl<T, F> {
@@ -468,15 +454,13 @@ pub mod v5 {
 		}
 
 		fn on_runtime_upgrade() -> frame_support::weights::Weight {
-			// We will read SaleInfo and, if present, also Configuration.
 			let mut weight = T::DbWeight::get().reads(1);
 
 			if let Some(old_sale) = old::SaleInfo::<T>::get() {
 				let first_region_begin = F::region_begin();
 
-				// `region_length` comes from Configuration, which `do_start_sales` writes before
-				// any sale. Default to 0 (sale_index 1) if absent, so the record is still
-				// rewritten in the new layout.
+				// `region_length` from Configuration; defaults to 0 (sale_index 1) if absent, so
+				// the record is rewritten rather than the migration panicking.
 				let region_length = if let Some(config) = Configuration::<T>::get() {
 					config.region_length
 				} else {
@@ -484,15 +468,11 @@ pub mod v5 {
 				};
 				weight.saturating_accrue(T::DbWeight::get().reads(1));
 
-				// Sales rotate one region at a time: `region_begin` advances by `region_length`
-				// timeslices on every sale, contiguously and with no gaps. So the number of sales
-				// completed since the first is `(region_begin - first_region_begin) /
-				// region_length`, and the current index is that plus one; the first stored sale is
-				// index 1, since the bootstrap sale seeded in `do_start_sales` is the imaginary
-				// index 0.
-				//
-				// We count in timeslices rather than relay blocks because the relay-block spacing
-				// between sales is not uniform if the chain's block cadence ever changed.
+				// `region_begin` advances by `region_length` timeslices each sale with no gaps, so
+				// completed sales = `(region_begin - first_region_begin) / region_length` and the
+				// current index is that plus one. The bootstrap sale in `do_start_sales` is index
+				// 0, so the first stored sale is index 1. Counted in timeslices, which are
+				// exact.
 				let completed_regions = if region_length > 0 {
 					old_sale.region_begin.saturating_sub(first_region_begin) / region_length
 				} else {
@@ -547,8 +527,7 @@ pub mod v5 {
 				Decode::decode(&mut &state[..])
 					.map_err(|_| "Failed to decode pre_upgrade state")?;
 
-			// Only assert on the migrated record when there was a SaleInfo to migrate. A missing
-			// SaleInfo is skipped by `on_runtime_upgrade`, so a missing record here is valid.
+			// on_runtime_upgrade skips a missing SaleInfo, so only check when one existed.
 			if let Some((old_sale_start, old_region_begin, old_region_end)) = old_state {
 				let new_sale =
 					SaleInfo::<T>::get().ok_or("SaleInfo should still exist after migration")?;
