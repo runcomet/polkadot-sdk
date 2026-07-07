@@ -453,6 +453,10 @@ fn migration_v5_reconstructs_sale_index_from_region_begin() {
 fn migration_v5_defaults_sale_index_when_configuration_missing() {
 	use crate::migration::v5::{old, FirstSaleRegion, MigrateToV5Impl};
 	use frame_support::traits::UncheckedOnRuntimeUpgrade;
+	use sp_tracing::{
+		test_log_capture::init_log_capture,
+		tracing::{subscriber, Level},
+	};
 
 	struct FirstRegion;
 	impl FirstSaleRegion for FirstRegion {
@@ -481,12 +485,17 @@ fn migration_v5_defaults_sale_index_when_configuration_missing() {
 		});
 		Configuration::<Test>::kill();
 
-		let _ =
-			<MigrateToV5Impl<Test, FirstRegion> as UncheckedOnRuntimeUpgrade>::on_runtime_upgrade();
+		// Bridges `log` records into `tracing` so the capture subscriber sees them.
+		sp_tracing::init_for_tests();
+		let (log_capture, subscriber) = init_log_capture(Level::ERROR, false);
+		subscriber::with_default(subscriber, || {
+			let _ = <MigrateToV5Impl<Test, FirstRegion> as UncheckedOnRuntimeUpgrade>::on_runtime_upgrade();
+		});
 
-		// Record still rewritten, with the fallback index.
+		// Record still rewritten, with the fallback index, and the fallback is logged.
 		let migrated = SaleInfo::<Test>::get().expect("record rewritten in new layout");
 		assert_eq!(migrated.sale_index, 1);
+		assert!(log_capture.contains("Configuration missing while SaleInfo exists"));
 	});
 }
 

@@ -464,6 +464,11 @@ pub mod v5 {
 				let region_length = if let Some(config) = Configuration::<T>::get() {
 					config.region_length
 				} else {
+					log::error!(
+						target: LOG_TARGET,
+						"Migrating SaleInfo: Configuration missing while SaleInfo exists; \
+						defaulting region_length to 0 and sale_index to 1",
+					);
 					0
 				};
 				weight.saturating_accrue(T::DbWeight::get().reads(1));
