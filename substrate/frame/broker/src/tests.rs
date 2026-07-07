@@ -485,7 +485,7 @@ fn migration_v5_defaults_sale_index_when_configuration_missing() {
 		});
 		Configuration::<Test>::kill();
 
-		// Bridges `log` records into `tracing` so the capture subscriber sees them.
+		// `log` to `tracing` bridge, needed for capture.
 		sp_tracing::init_for_tests();
 		let (log_capture, subscriber) = init_log_capture(Level::ERROR, false);
 		subscriber::with_default(subscriber, || {
