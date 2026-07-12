@@ -1,0 +1,7 @@
+title: '`staking-async`: include the unlock era in the Unbonded event'
+doc:
+- audience: Todo
+  description: 'resolves #12578'
+crates:
+- name: pallet-staking-async
+  bump: major
