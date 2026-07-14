@@ -1,6 +1,6 @@
 title: Remove non permanent migrations on westend
 doc:
-- audience: Todo
+- audience: Runtime Dev
   description: |-
     Remove one-shot migrations that already executed on the live Westend system chains (all on spec 1024001), plus their now-unused support code.
 
