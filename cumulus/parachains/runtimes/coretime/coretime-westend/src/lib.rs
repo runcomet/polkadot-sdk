@@ -127,6 +127,7 @@ pub type UncheckedExtrinsic =
 
 /// Migrations to apply on runtime upgrade.
 pub type Migrations = (
+	pallet_broker::migration::MigrateV4ToV5<Runtime, BrokerFirstSaleRegion>,
 	// permanent
 	pallet_xcm::migration::MigrateToLatestXcmVersion<Runtime>,
 	cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
@@ -153,7 +154,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("coretime-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("coretime-westend"),
 	authoring_version: 1,
-	spec_version: 1_022_004,
+	spec_version: 1_024_001,
 	impl_version: 0,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 2,
@@ -634,6 +635,18 @@ impl pallet_accumulate_and_forward::Config for Runtime {
 	type MinTransferAmount = MinForwardAmount;
 	type BlockNumberProvider = RelaychainDataProvider<Runtime>;
 	type WeightInfo = weights::pallet_accumulate_and_forward::WeightInfo<Runtime>;
+}
+
+/// `region_begin` of the first bulk Coretime sale on Westend, from the first
+/// `broker.SaleInitialized` event. Anchors the v5 migration's `sale_index` reconstruction.
+const CORETIME_WESTEND_FIRST_SALE_REGION_BEGIN: u32 = 246_662;
+
+pub struct BrokerFirstSaleRegion;
+
+impl pallet_broker::migration::v5::FirstSaleRegion for BrokerFirstSaleRegion {
+	fn region_begin() -> u32 {
+		CORETIME_WESTEND_FIRST_SALE_REGION_BEGIN
+	}
 }
 
 pub type MetaTxExtension = (
