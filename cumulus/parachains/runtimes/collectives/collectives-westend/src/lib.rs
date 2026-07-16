@@ -52,8 +52,9 @@ extern crate alloc;
 pub use ambassador::pallet_ambassador_origins;
 
 use alloc::{vec, vec::Vec};
+use ambassador::AmbassadorCoreInstance;
 use cumulus_pallet_parachain_system::{RelayNumberMonotonicallyIncreases, RelaychainDataProvider};
-use fellowship::{pallet_fellowship_origins, Fellows};
+use fellowship::{pallet_fellowship_origins, Fellows, FellowshipCoreInstance};
 use impls::{AllianceProposalProvider, EqualOrGreatestRootCmp};
 use sp_api::impl_runtime_apis;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
