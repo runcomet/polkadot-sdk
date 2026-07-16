@@ -184,7 +184,11 @@ fn validators_still_have_full_bonding_duration() {
 		assert_ok!(Staking::unbond(RuntimeOrigin::signed(11), 200));
 		assert_eq!(
 			staking_events_since_last_call(),
-			vec![Event::Unbonded { stash: 11, amount: 200, era: active_era() + BondingDuration::get() }]
+			vec![Event::Unbonded {
+				stash: 11,
+				amount: 200,
+				era: active_era() + BondingDuration::get()
+			}]
 		);
 
 		// Unlocking should be set to active_era + BondingDuration (not active_era +
