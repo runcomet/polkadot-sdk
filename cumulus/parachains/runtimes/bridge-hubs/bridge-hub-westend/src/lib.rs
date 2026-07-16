@@ -106,6 +106,7 @@ use testnet_parachains_constants::westend::{
 };
 use xcm::{Version as XcmVersion, VersionedLocation};
 
+#[cfg(feature = "runtime-benchmarks")]
 use westend_runtime_constants::system_parachain::ASSET_HUB_ID;
 
 /// The address format for describing accounts.
