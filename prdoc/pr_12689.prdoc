@@ -7,8 +7,6 @@ doc:
     Duplicate entries cause `rotate_sale`/`renew_cores` to renew and charge the payer once per duplicate, consume the `MaxAutoRenewals` bound with spurious records, and leave orphans after `disable_auto_renew` (which removes a single position).
 
     A second enable for an already-enrolled core now returns the new `AutoRenewalAlreadyEnabled` error.
-
-    Closes #12602.
 crates:
 - name: pallet-broker
   bump: minor
