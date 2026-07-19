@@ -9,4 +9,4 @@ doc:
     A second enable for an already-enrolled core now returns the new `AutoRenewalAlreadyEnabled` error.
 crates:
 - name: pallet-broker
-  bump: minor
+  bump: major
